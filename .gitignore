@@ -5,9 +5,13 @@ node_modules/
 # Vite and other build output
 dist/
 **/dist/
+release/
+**/release/
 .vite/
 **/.vite/
 coverage/
+tmp/
+**/tmp/
 
 # Logs and local debug files
 *.log

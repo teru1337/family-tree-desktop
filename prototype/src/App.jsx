@@ -1030,6 +1030,10 @@ export function App() {
   };
   const exitApplication = () => {
     setMainMenuOpen(false);
+    if (window.familyTreeDesktop?.close) {
+      window.familyTreeDesktop.close();
+      return;
+    }
     window.close();
     window.setTimeout(() => setToast("Чтобы завершить работу, закройте окно приложения."), 120);
   };
