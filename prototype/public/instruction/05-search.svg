@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-05-search.jpg" role="img" aria-label="Поиск человека по имени">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
+    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
+  </defs>
+  <path class="line" d="M390 70V112H1100V194"/>
+  <path class="line" d="M1690 220H1500V318H1115"/>
+  <path class="line" d="M1690 420H1530V372H1115"/>
+  <g>
+    <rect x="274" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="290" y="35" class="label"><tspan x="290">1. Введите имя</tspan><tspan x="290" dy="20" class="note">Можно написать часть имени</tspan></text>
+    <rect x="1600" y="190" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="215" class="label"><tspan x="1614">2. Список совпадений</tspan><tspan x="1614" dy="20" class="note">Проверьте город</tspan></text>
+    <rect x="1600" y="390" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="415" class="label"><tspan x="1614">3. Выберите человека</tspan><tspan x="1614" dy="20" class="note">Откроется его панель</tspan></text>
+  </g>
+</svg>

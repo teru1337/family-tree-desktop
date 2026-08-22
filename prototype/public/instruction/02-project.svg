@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-02-project.jpg" role="img" aria-label="Рабочее окно с подписями кнопок проекта">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
+    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
+  </defs>
+  <path class="line" d="M300 70V108H610V194"/>
+  <path class="line" d="M620 70V112H795V194"/>
+  <path class="line" d="M940 70V118H960V194"/>
+  <path class="line" d="M1260 70V116H1140V194"/>
+  <g>
+    <rect x="184" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="200" y="35" class="label"><tspan x="200">1. Добавить человека</tspan><tspan x="200" dy="20" class="note">Создать новую запись</tspan></text>
+    <rect x="504" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="520" y="35" class="label"><tspan x="520">2. Открыть проект</tspan><tspan x="520" dy="20" class="note">Загрузить сохранённый файл</tspan></text>
+    <rect x="824" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="840" y="35" class="label"><tspan x="840">3. Сохранить проект</tspan><tspan x="840" dy="20" class="note">Записать изменения</tspan></text>
+    <rect x="1144" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1160" y="35" class="label"><tspan x="1160">4. Поиск по именам</tspan><tspan x="1160" dy="20" class="note">Быстро найти человека</tspan></text>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-07-backups.jpg" role="img" aria-label="Резервные копии и восстановление">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
+    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
+  </defs>
+  <path class="line" d="M290 70V108H720V210"/>
+  <path class="line" d="M1690 250H1500V310H1060"/>
+  <path class="line" d="M1690 470H1480V310H1165"/>
+  <g>
+    <rect x="184" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="200" y="35" class="label"><tspan x="200">1. Список копий</tspan><tspan x="200" dy="20" class="note">Копии хранятся локально</tspan></text>
+    <rect x="1600" y="220" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="245" class="label"><tspan x="1614">2. Скачать</tspan><tspan x="1614" dy="20" class="note">Сохранить копию отдельно</tspan></text>
+    <rect x="1600" y="440" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="465" class="label"><tspan x="1614">3. Восстановить</tspan><tspan x="1614" dy="20" class="note">Вернуть состояние дерева</tspan></text>
+  </g>
+</svg>

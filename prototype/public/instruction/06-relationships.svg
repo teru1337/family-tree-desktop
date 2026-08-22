@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-06-relationships.jpg" role="img" aria-label="Управление семейными связями">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
+    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
+  </defs>
+  <path class="line" d="M1690 122H1510V440H1380"/>
+  <path class="line" d="M1690 304H1540V616H1310"/>
+  <path class="line" d="M1690 486H1570V704H1390"/>
+  <g>
+    <rect x="1600" y="92" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="117" class="label"><tspan x="1614">1. Тип связи</tspan><tspan x="1614" dy="20" class="note">Родитель, брак и другое</tspan></text>
+    <rect x="1600" y="274" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="299" class="label"><tspan x="1614">2. Происхождение</tspan><tspan x="1614" dy="20" class="note">Биологическая связь</tspan></text>
+    <rect x="1600" y="456" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="481" class="label"><tspan x="1614">3. Сохранить связь</tspan><tspan x="1614" dy="20" class="note">Добавить её в дерево</tspan></text>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-08-export-settings.jpg" role="img" aria-label="Экспорт дерева и настройки качества">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
+    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
+  </defs>
+  <path class="line" d="M1690 122H1510V328H900"/>
+  <path class="line" d="M1690 322H1540V444H900"/>
+  <path class="line" d="M1690 522H1570V550H900"/>
+  <g>
+    <rect x="1600" y="92" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="117" class="label"><tspan x="1614">1. Выберите формат</tspan><tspan x="1614" dy="20" class="note">PDF, PNG, TIFF или листы</tspan></text>
+    <rect x="1600" y="292" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="317" class="label"><tspan x="1614">2. Настройте качество</tspan><tspan x="1614" dy="20" class="note">Экран, печать или плакат</tspan></text>
+    <rect x="1600" y="492" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
+    <text x="1614" y="517" class="label"><tspan x="1614">3. Выберите разметку</tspan><tspan x="1614" dy="20" class="note">Плакат или листы</tspan></text>
+  </g>
+</svg>
