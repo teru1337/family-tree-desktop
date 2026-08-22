@@ -1,12 +1,15 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const APP_ID = "ru.teru1337.familytree";
+const RELEASES_URL = "https://github.com/teru1337/family-tree-desktop/releases";
 const rendererRoot = path.resolve(__dirname, "..", "dist", "client");
 let mainWindow = null;
 let staticServer = null;
+let currentUpdateVersion = "";
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -85,6 +88,60 @@ function startRendererServer() {
   });
 }
 
+function sendUpdateStatus(state, details = {}) {
+  mainWindow?.webContents.send("family-tree-update-status", {
+    state,
+    currentVersion: app.getVersion(),
+    ...details,
+  });
+}
+
+function describeUpdateError(error) {
+  return String(error?.message || error || "Неизвестная ошибка проверки обновлений")
+    .replace(/https?:\/\/[^\s)]+/g, "ссылка на сервер обновлений");
+}
+
+function configureUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on("checking-for-update", () => sendUpdateStatus("checking"));
+  autoUpdater.on("update-available", (info) => {
+    currentUpdateVersion = info.version;
+    sendUpdateStatus("available", {
+      version: info.version,
+      releaseDate: info.releaseDate || "",
+    });
+  });
+  autoUpdater.on("update-not-available", () => sendUpdateStatus("not-available"));
+  autoUpdater.on("download-progress", (progress) => sendUpdateStatus("downloading", {
+    version: currentUpdateVersion,
+    percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))),
+  }));
+  autoUpdater.on("update-downloaded", (info) => sendUpdateStatus("downloaded", {
+    version: info.version,
+  }));
+  autoUpdater.on("error", (error) => sendUpdateStatus("error", {
+    message: describeUpdateError(error),
+  }));
+}
+
+async function checkForUpdates() {
+  if (!app.isPackaged) {
+    sendUpdateStatus("unsupported");
+    return { state: "unsupported", currentVersion: app.getVersion() };
+  }
+  try {
+    await autoUpdater.checkForUpdates();
+    return { state: "checking", currentVersion: app.getVersion() };
+  } catch (error) {
+    const message = describeUpdateError(error);
+    sendUpdateStatus("error", { message });
+    return { state: "error", currentVersion: app.getVersion(), message };
+  }
+}
+
 function createWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -107,6 +164,9 @@ function createWindow(port) {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.webContents.once("did-finish-load", () => {
+    if (app.isPackaged) setTimeout(() => checkForUpdates(), 1200);
+  });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
 }
 
@@ -122,6 +182,7 @@ if (!hasSingleInstance) {
 
   app.whenReady().then(async () => {
     app.setAppUserModelId(APP_ID);
+    configureUpdater();
     staticServer = await startRendererServer();
     createWindow(staticServer.port);
   }).catch((error) => {
@@ -131,6 +192,20 @@ if (!hasSingleInstance) {
 
   ipcMain.on("family-tree-close", (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+  ipcMain.handle("family-tree-version", () => app.getVersion());
+  ipcMain.handle("family-tree-update-check", () => checkForUpdates());
+  ipcMain.handle("family-tree-update-download", async () => {
+    await autoUpdater.downloadUpdate();
+    return true;
+  });
+  ipcMain.handle("family-tree-update-install", () => {
+    autoUpdater.quitAndInstall();
+    return true;
+  });
+  ipcMain.handle("family-tree-open-releases", async () => {
+    await shell.openExternal(RELEASES_URL);
+    return true;
   });
 
   app.on("before-quit", () => {

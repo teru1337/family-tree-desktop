@@ -579,6 +579,35 @@ function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }
   );
 }
 
+function UpdateModal({ status, onClose, onDownload, onInstall, onOpenReleases }) {
+  const downloaded = status.state === "downloaded";
+  const downloading = status.state === "downloading";
+  const title = downloaded ? "Обновление готово" : downloading ? "Скачиваем обновление" : "Доступна новая версия";
+  const description = downloaded
+    ? "Новая версия уже загружена. Перезапустите приложение, чтобы установить её."
+    : downloading
+      ? "Приложение скачивает обновление с GitHub. Дерево можно оставить открытым."
+      : "Для приложения вышла новая версия с исправлениями и улучшениями.";
+  return (
+    <div className="update-backdrop" role="presentation" onClick={onClose}>
+      <section className="update-modal" role="dialog" aria-modal="true" aria-labelledby="update-modal-title" onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="icon-button update-close" onClick={onClose} aria-label="Закрыть уведомление"><X size={21} /></button>
+        <div className="update-icon"><DownloadSimple size={28} weight="bold" /></div>
+        <span className="eyebrow">Обновление приложения</span>
+        <h2 id="update-modal-title">{title}</h2>
+        <p className="update-description">{description}</p>
+        <div className="update-versions"><span>Текущая версия: <strong>{status.currentVersion || "—"}</strong></span><span>Новая версия: <strong>{status.version || "—"}</strong></span></div>
+        {downloading && <div className="update-progress" aria-label="Ход скачивания"><div className="update-progress-track"><span style={{ width: (status.percent || 0) + "%" }} /></div><span>{status.percent || 0}%</span></div>}
+        <div className="update-actions">
+          <button type="button" className="button button-ghost" onClick={onOpenReleases}>Страница релиза</button>
+          {!downloaded && <button type="button" className="button button-primary" onClick={onDownload} disabled={downloading}>{downloading ? "Скачивание…" : "Скачать обновление"}</button>}
+          {downloaded && <button type="button" className="button button-primary" onClick={onInstall}>Перезапустить и обновить</button>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 const instructionSteps = [
   { image: "01-menu.svg", source: "source-01-menu.jpg", title: "Главное меню", text: "Здесь начинается работа с приложением. Меню можно открыть в любой момент кнопкой «Меню» или нажатием на логотип «Семейное древо».", tips: ["Создать древо — начать пустой проект.", "Загрузить древо — открыть файл .familytree.", "Настройки и инструкция доступны без закрытия проекта."] },
   { image: "02-project.svg", source: "source-02-project.jpg", title: "Создать, открыть и сохранить дерево", text: "После входа можно создать новое дерево, открыть ранее сохранённый файл или скачать текущий проект на компьютер.", tips: ["Файл проекта имеет расширение .familytree.", "Сохраняйте копию на внешний диск или флешку.", "Автосохранение работает отдельно от скачивания файла."] },
@@ -774,6 +803,8 @@ export function App() {
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [instructionOpen, setInstructionOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const fileInputRef = useRef(null);
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
   const treeLayout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
@@ -802,6 +833,17 @@ export function App() {
   useEffect(() => { if (!toast) return undefined; const timeout = window.setTimeout(() => setToast(""), 2600); return () => window.clearTimeout(timeout); }, [toast]);
   useEffect(() => { if (!loadedSession) return undefined; const timeout = window.setTimeout(() => setToast("Локальная рабочая копия восстановлена"), 250); return () => window.clearTimeout(timeout); }, [loadedSession]);
   useEffect(() => {
+    const desktop = window.familyTreeDesktop;
+    if (!desktop?.onUpdateStatus) return undefined;
+    const unsubscribe = desktop.onUpdateStatus((status) => {
+      setUpdateStatus(status);
+      if (status.state === "available" || status.state === "downloaded") setUpdateOpen(true);
+      if (status.state === "not-available") setToast("Установлена последняя версия приложения");
+      if (status.state === "error") setToast("Не удалось проверить обновления");
+    });
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
     if (!dirty || !autoSaveEnabled) return undefined;
     const timeout = window.setTimeout(() => {
       const payload = createProjectPayload(people, projectMeta, partnerships);
@@ -813,6 +855,39 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [dirty, autoSaveEnabled, people, projectMeta, partnerships]);
 
+  const checkForUpdates = async () => {
+    if (!window.familyTreeDesktop?.checkForUpdates) {
+      setToast("Проверка обновлений доступна в установленном приложении");
+      return;
+    }
+    setToast("Проверяем обновления…");
+    try {
+      await window.familyTreeDesktop.checkForUpdates();
+    } catch {
+      setToast("Не удалось проверить обновления");
+    }
+  };
+  const downloadUpdate = async () => {
+    try {
+      await window.familyTreeDesktop?.downloadUpdate?.();
+    } catch {
+      setToast("Не удалось скачать обновление");
+    }
+  };
+  const installUpdate = async () => {
+    try {
+      await window.familyTreeDesktop?.installUpdate?.();
+    } catch {
+      setToast("Не удалось установить обновление");
+    }
+  };
+  const openReleasesPage = async () => {
+    if (window.familyTreeDesktop?.openReleases) {
+      await window.familyTreeDesktop.openReleases();
+      return;
+    }
+    window.open("https://github.com/teru1337/family-tree-desktop/releases", "_blank", "noopener,noreferrer");
+  };
   const selectPerson = (id) => { setSelectedId(id); setQuery(""); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
   const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person) return; setSelectedId(id); setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${person.name || "без имени"}`); };
   const openEditor = (person = null, relation = "") => { setDraft(person ? { ...person } : { ...blankPerson, id: "" }); setRelationshipMode(relation); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || ""); setRelationshipEditing(false); setInspectorOpen(true); setEditing(true); };
@@ -1052,7 +1127,7 @@ export function App() {
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
            <button type="button" className="header-action" onClick={() => openExport("print")}><Printer size={20} /> Печать</button>
-           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={openSettings}><Note size={16} /> Настройки проекта</button><button type="button" onClick={openInstruction}><Info size={16} /> Как это работает</button></div>}</div>
+           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={openSettings}><Note size={16} /> Настройки проекта</button><button type="button" onClick={openInstruction}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
       <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`}><TreeCanvas people={people} partnerships={partnerships} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} />{inspectorOpen && <aside className="inspector"><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside>}</main>
@@ -1067,6 +1142,7 @@ export function App() {
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={() => setNewTreeConfirmOpen(false)} onConfirm={applyNewTree} />}
        {mainMenuOpen && <MainMenuModal onCreate={createNewTree} onLoad={openProject} onSettings={openSettings} onHelp={openInstruction} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
+       {updateStatus && updateOpen && ["available", "downloading", "downloaded"].includes(updateStatus.state) && <UpdateModal status={updateStatus} onClose={() => setUpdateOpen(false)} onDownload={downloadUpdate} onInstall={installUpdate} onOpenReleases={openReleasesPage} />}
      </div>
   );
 }
