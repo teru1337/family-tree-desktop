@@ -1,10 +1,11 @@
 import { normalizePersonDate, validateDateRecord } from "./dates.js";
 import { inspectFamilyData } from "./data-quality.js";
 import { normalizeCustomFields } from "./person-fields.js";
+import { normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents } from "./timeline.js";
 
 export const PROJECT_FORMAT = "familytree";
-export const PROJECT_VERSION = 6;
-export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, 5, PROJECT_VERSION];
+export const PROJECT_VERSION = 7;
+export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, 5, 6, PROJECT_VERSION];
 export const PERSON_CONFIDENCE_LEVELS = Object.freeze(["unknown", "low", "medium", "high"]);
 
 // Названия ключей сохраняем прежними, чтобы не потерять рабочие копии после обновления.
@@ -43,6 +44,8 @@ function normalizePersonMetadata(person) {
     confidence: PERSON_CONFIDENCE_LEVELS.includes(person?.confidence) ? person.confidence : "unknown",
     siblingOrder: Number.isInteger(siblingOrderNumber) && siblingOrderNumber > 0 && siblingOrderNumber <= 999 ? siblingOrderNumber : null,
     customFields: normalizeCustomFields(person?.customFields),
+    factSources: normalizeFactSources(person?.factSources),
+    timelineEvents: normalizeTimelineEvents(person?.timelineEvents),
   };
 }
 
@@ -82,7 +85,8 @@ function normalizeParentLinks(person) {
     let id = String(link?.id || `parent-link-${childId}-${personId}-${type}`);
     if (usedIds.has(id)) id = `${id}-${index + 1}`;
     usedIds.add(id);
-    links.push({ id, personId, type });
+    const source = normalizeSourceValue(link?.source);
+    links.push({ id, personId, type, ...(source ? { source } : {}) });
   });
   const known = new Set(links.map((link) => link.personId));
   uniqueIds(person?.parentIds).forEach((personId) => {
@@ -109,6 +113,7 @@ function normalizePartnership(record, index, peopleIds, usedIds = new Set()) {
     startDatePrecision: typeof record?.startDatePrecision === "string" ? record.startDatePrecision : "unknown",
     endDate: typeof record?.endDate === "string" ? record.endDate : "",
     endDatePrecision: typeof record?.endDatePrecision === "string" ? record.endDatePrecision : "unknown",
+    ...(normalizeSourceValue(record?.source) ? { source: normalizeSourceValue(record?.source) } : {}),
   };
 }
 
@@ -209,9 +214,10 @@ function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
   const seenParentRelations = new Set();
   const seenParentPairs = new Set();
   const partnershipPairs = new Set();
-  const addParent = (parentId, childId, type, id) => {
+  const addParent = (parentId, childId, type, id, source = "") => {
     if (!peopleIds.has(parentId) || !peopleIds.has(childId) || parentId === childId) return;
-    const relation = { id: String(id || `parent-link-${childId}-${parentId}-${type}`), kind: "parent", parentId, childId, type: parentLinkTypes.has(type) ? type : "biological" };
+    const normalizedSource = normalizeSourceValue(source);
+    const relation = { id: String(id || `parent-link-${childId}-${parentId}-${type}`), kind: "parent", parentId, childId, type: parentLinkTypes.has(type) ? type : "biological", ...(normalizedSource ? { source: normalizedSource } : {}) };
     const semanticKey = relationSemanticKey(relation);
     if (seenParentRelations.has(semanticKey)) return;
     seenParentRelations.add(semanticKey);
@@ -220,7 +226,7 @@ function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
   };
   ensureArray(people).forEach((person) => {
     const childId = String(person?.id || "");
-    normalizeParentLinks(person).forEach((link) => addParent(String(link.personId), childId, link.type, link.id));
+    normalizeParentLinks(person).forEach((link) => addParent(String(link.personId), childId, link.type, link.id, link.source));
   });
   ensureArray(people).forEach((person) => {
     const parentId = String(person?.id || "");
@@ -230,18 +236,19 @@ function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
   });
 
   const siblingPairs = new Set();
-  const addSibling = (firstId, secondId, type, id) => {
+  const addSibling = (firstId, secondId, type, id, source = "") => {
     if (!peopleIds.has(firstId) || !peopleIds.has(secondId) || firstId === secondId) return;
     const personIds = [firstId, secondId].sort();
     const normalizedType = siblingLinkTypes.has(type) ? type : "biological";
     const pairKey = `${personIds.join("::")}::${normalizedType}`;
     if (siblingPairs.has(pairKey)) return;
     siblingPairs.add(pairKey);
-    relations.push({ id: String(id || `sibling-link-${personIds.join("-")}-${normalizedType}`), kind: "sibling", personIds, type: normalizedType });
+    const normalizedSource = normalizeSourceValue(source);
+    relations.push({ id: String(id || `sibling-link-${personIds.join("-")}-${normalizedType}`), kind: "sibling", personIds, type: normalizedType, ...(normalizedSource ? { source: normalizedSource } : {}) });
   };
   ensureArray(people).forEach((person) => {
     const personId = String(person?.id || "");
-    ensureArray(person?.siblingLinks).forEach((link) => addSibling(personId, String(link?.personId || ""), link?.type, link?.id));
+    ensureArray(person?.siblingLinks).forEach((link) => addSibling(personId, String(link?.personId || ""), link?.type, link?.id, link?.source));
     uniqueIds(person?.siblingIds).forEach((siblingId) => addSibling(personId, siblingId, "biological"));
   });
 
@@ -281,7 +288,8 @@ function normalizeRelation(record, index, peopleIds, usedIds = new Set(), semant
       while (usedIds.has(id)) id = `${baseId}-${childId}-${++suffix}`;
     }
     usedIds.add(id);
-    return { id, kind: "parent", parentId, childId, type };
+    const source = normalizeSourceValue(record?.source);
+    return { id, kind: "parent", parentId, childId, type, ...(source ? { source } : {}) };
   }
   if (kind === "sibling") {
     const personIds = uniqueIds(record?.personIds).filter((id) => peopleIds.has(id));
@@ -294,7 +302,8 @@ function normalizeRelation(record, index, peopleIds, usedIds = new Set(), semant
     let id = String(record?.id || `sibling-link-${sortedIds.join("-")}-${type}`);
     if (usedIds.has(id)) id = `${id}-${index + 1}`;
     usedIds.add(id);
-    return { id, kind: "sibling", personIds: sortedIds, type };
+    const source = normalizeSourceValue(record?.source);
+    return { id, kind: "sibling", personIds: sortedIds, type, ...(source ? { source } : {}) };
   }
   const partnership = normalizePartnership(record, index, peopleIds, usedIds);
   return partnership ? { ...partnership, kind: "partnership" } : null;
@@ -314,7 +323,8 @@ function attachLegacyRelations(people, relations) {
       const parent = byId.get(relation.parentId);
       const child = byId.get(relation.childId);
       if (!parent || !child) return;
-      child.parentLinks.push({ id: relation.id, personId: relation.parentId, type: relation.type });
+      const source = normalizeSourceValue(relation.source);
+      child.parentLinks.push({ id: relation.id, personId: relation.parentId, type: relation.type, ...(source ? { source } : {}) });
       if (relation.type === "biological") child.parentIds.push(relation.parentId);
       parent.childIds.push(relation.childId);
     }
@@ -331,7 +341,8 @@ function attachLegacyRelations(people, relations) {
         const siblingId = personIds[index === 0 ? 1 : 0];
         if (!person || !siblingId) return;
         person.siblingIds.push(siblingId);
-        person.siblingLinks.push({ id: relation.id, personId: siblingId, type: relation.type });
+        const source = normalizeSourceValue(relation.source);
+        person.siblingLinks.push({ id: relation.id, personId: siblingId, type: relation.type, ...(source ? { source } : {}) });
       });
     }
   });
@@ -346,7 +357,7 @@ function relationToPartnership(relation) {
 function migrateProject(raw) {
   if (!raw || typeof raw !== "object") return { payload: raw, migratedFrom: null };
   const version = Number(raw.manifest?.version);
-  if (version === 1 || version === 2 || version === 3 || version === 4 || version === 5) {
+  if (Array.isArray(raw.people) && (version === 1 || version === 2 || version === 3 || version === 4 || version === 5 || version === 6)) {
     const migratedRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
     return {
       payload: {
@@ -400,6 +411,8 @@ export function validateProject(raw) {
   raw.people.forEach((person) => {
     const personId = String(person?.id || "человека");
     if (person?.customFields !== undefined && !Array.isArray(person.customFields)) warnings.push(`Дополнительные поля записи ${personId} указаны не списком и будут сброшены.`);
+    if (person?.factSources !== undefined && (!person.factSources || typeof person.factSources !== "object" || Array.isArray(person.factSources))) warnings.push(`Источники отдельных сведений записи ${personId} указаны неправильно и будут сброшены.`);
+    if (person?.timelineEvents !== undefined && !Array.isArray(person.timelineEvents)) warnings.push(`Временная шкала записи ${personId} указана не списком и будет сброшена.`);
     if (person?.siblingOrder !== undefined && person?.siblingOrder !== null && person?.siblingOrder !== "") {
       const siblingOrder = Number(person.siblingOrder);
       if (!Number.isInteger(siblingOrder) || siblingOrder < 1 || siblingOrder > 999) warnings.push(`Порядок записи ${personId} среди братьев и сестёр указан неправильно и будет сброшен.`);

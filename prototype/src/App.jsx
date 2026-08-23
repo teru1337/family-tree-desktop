@@ -58,6 +58,7 @@ import { explainUserError } from "./ui-feedback.js";
 import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
 import { getSiblingComponent, orderGenerationMembers, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
 import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_FIELD_LABEL, MAX_CUSTOM_FIELD_VALUE, formatCardFieldLines, normalizeCustomFields, sanitizeCardFields, validateCustomFields } from "./person-fields.js";
+import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_PLACE, MAX_EVENT_SOURCE, MAX_EVENT_TITLE, MAX_TIMELINE_EVENTS, TIMELINE_EVENT_TYPES, normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents, sortTimelineEvents, timelineEventLabel, validateFactSources, validateTimelineEvents } from "./timeline.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -73,7 +74,7 @@ import {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
@@ -110,7 +111,7 @@ function getDraftDateRecord(draft) {
   };
 }
 
-function validatePersonDraft(draft, { isNew = false, relationshipMode = "", connectionTargetId = "" } = {}) {
+function validatePersonDraft(draft, { isNew = false, relationshipMode = "", connectionTargetId = "", relationshipSource = "" } = {}) {
   const errors = {};
   const name = String(draft?.name || "").trim();
   const maidenName = String(draft?.maidenName || "").trim();
@@ -119,6 +120,8 @@ function validatePersonDraft(draft, { isNew = false, relationshipMode = "", conn
   const biography = String(draft?.biography || "").trim();
   const source = String(draft?.source || "").trim();
   const customFields = Array.isArray(draft?.customFields) ? draft.customFields : [];
+  const factSources = draft?.factSources || {};
+  const timelineEvents = Array.isArray(draft?.timelineEvents) ? draft.timelineEvents : [];
   const personNamePattern = /^[\p{L}\s.'’\-–—()]+$/u;
   const placePattern = /^[\p{L}\p{N}\s.,'’\-–—()\/$№]+$/u;
   const occupationPattern = /^[\p{L}\p{N}\s.,'’\-–—()/$№]+$/u;
@@ -132,6 +135,11 @@ function validatePersonDraft(draft, { isNew = false, relationshipMode = "", conn
   if (source.length > 300 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(source)) errors.source = "Источник слишком длинный или содержит недопустимые символы; максимум 300 знаков.";
   const customFieldsError = validateCustomFields(customFields);
   if (customFieldsError) errors.customFields = customFieldsError;
+  const factSourcesError = validateFactSources(factSources);
+  if (factSourcesError) errors.factSources = factSourcesError;
+  const timelineError = validateTimelineEvents(timelineEvents);
+  if (timelineError) errors.timelineEvents = timelineError;
+  if (String(relationshipSource || "").trim().length > MAX_EVENT_SOURCE) errors.relationshipSource = `Источник связи — не больше ${MAX_EVENT_SOURCE} знаков.`;
   if (isNew && relationshipMode && !connectionTargetId) errors.connectionTargetId = "Выберите человека, с которым нужно установить связь.";
   return errors;
 }
@@ -144,24 +152,26 @@ function makeParentLinkId(childId, parentId, type) {
   return `parent-link-${childId}-${parentId}-${type}`;
 }
 
-function addParentLink(links, personId, type, childId = "unknown-person") {
+function addParentLink(links, personId, type, childId = "unknown-person", source = "") {
   const current = Array.isArray(links) ? links : [];
-  if (current.some((link) => link.personId === personId && link.type === type)) return current;
-  return [...current, { id: makeParentLinkId(childId, personId, type), personId, type }];
+  const existing = current.find((link) => link.personId === personId && link.type === type);
+  if (existing) return current.map((link) => link === existing ? { ...link, source: normalizeSourceValue(source) || link.source || "" } : link);
+  return [...current, { id: makeParentLinkId(childId, personId, type), personId, type, source: normalizeSourceValue(source) }];
 }
 
 function makeSiblingLinkId(personId, siblingId, type) {
   return `sibling-link-${personId}-${siblingId}-${type}`;
 }
 
-function addSiblingLink(links, personId, type, siblingId = "unknown-person") {
+function addSiblingLink(links, personId, type, siblingId = "unknown-person", source = "") {
   const current = Array.isArray(links) ? links : [];
-  if (current.some((link) => link.personId === personId && link.type === type)) return current;
+  const existing = current.find((link) => link.personId === personId && link.type === type);
+  if (existing) return current.map((link) => link === existing ? { ...link, source: normalizeSourceValue(source) || link.source || "" } : link);
   const baseId = makeSiblingLinkId(siblingId, personId, type);
   let id = baseId;
   let suffix = 1;
   while (current.some((link) => link.id === id)) id = `${baseId}-${++suffix}`;
-  return [...current, { id, personId, type }];
+  return [...current, { id, personId, type, source: normalizeSourceValue(source) }];
 }
 
 function relationshipDeleteOptions(person, people, partnerships) {
@@ -253,12 +263,12 @@ function Connector({ left, top, width, height = 1, vertical = false, className =
   return <span className={`connector ${vertical ? "connector-vertical" : ""} ${className}`} style={{ left, top, width, height }} />;
 }
 
-function RelationshipItem({ person, onSelect, meta = "", relationshipId = "" }) {
+function RelationshipItem({ person, onSelect, meta = "", relationshipId = "", source = "" }) {
   if (!person) return null;
   return (
     <button className="relationship-item" type="button" onClick={() => onSelect(person.id)}>
       <PersonAvatar person={person} />
-      <span className="relationship-copy"><span>{personDisplayName(person)}</span><small>{meta || person.year || "дата неизвестна"}</small>{relationshipId && <small className="relationship-id" title={`Уникальный идентификатор связи: ${relationshipId}`}>ID связи: {relationshipId}</small>}</span>
+      <span className="relationship-copy"><span>{personDisplayName(person)}</span><small>{meta || person.year || "дата неизвестна"}</small>{source && <small className="relationship-source">{relationSourceText(source)}</small>}{relationshipId && <small className="relationship-id" title={`Уникальный идентификатор связи: ${relationshipId}`}>ID связи: {relationshipId}</small>}</span>
     </button>
   );
 }
@@ -281,7 +291,7 @@ function SearchFilterPanel({ filters, generations, onChange, onReset }) {
 }
 
 function RelationSection({ title, items, onSelect, emptyText }) {
-  return <section className="relation-section"><div className="section-title-row"><h3>{title}</h3><PencilSimple size={15} /></div>{items.length ? items.map(({ person, meta, relationshipId }) => <RelationshipItem key={`${person.id}-${relationshipId || title}`} person={person} meta={meta} relationshipId={relationshipId} onSelect={onSelect} />) : <p className="empty-relation">{emptyText}</p>}</section>;
+  return <section className="relation-section"><div className="section-title-row"><h3>{title}</h3><PencilSimple size={15} /></div>{items.length ? items.map(({ person, meta, relationshipId, source }) => <RelationshipItem key={`${person.id}-${relationshipId || title}`} person={person} meta={meta} relationshipId={relationshipId} source={source} onSelect={onSelect} />) : <p className="empty-relation">{emptyText}</p>}</section>;
 }
 
 function SiblingOrderSection({ person, siblings, onMove }) {
@@ -298,6 +308,24 @@ function partnershipDescription(partnership) {
   return `${type}${partnership.startDate ? ` · с ${partnership.startDate}` : ""}`;
 }
 
+const factSourceLabel = Object.fromEntries(FACT_SOURCE_OPTIONS.map((item) => [item.value, item.label]));
+const timelinePrecisionLabel = { exact: "точная дата", year: "только год", approximate: "примерная дата", range: "диапазон", unknown: "дата не уточнена" };
+
+function relationSourceText(source) {
+  return source ? `Источник: ${source}` : "";
+}
+
+function FactSourcesSection({ person }) {
+  const sources = Object.entries(person?.factSources || {}).filter(([, source]) => source);
+  if (!sources.length) return null;
+  return <section className="detail-section fact-sources-section"><div className="section-title-row"><h3>Источники отдельных сведений</h3><Info size={15} /></div><dl className="facts-list">{sources.map(([fact, source]) => <div key={fact}><dt>{factSourceLabel[fact] || fact}</dt><dd>{source}</dd></div>)}</dl></section>;
+}
+
+function TimelineSection({ person }) {
+  const events = sortTimelineEvents(person?.timelineEvents);
+  return <section className="detail-section timeline-section"><div className="section-title-row"><h3>Временная шкала</h3><ClockCounterClockwise size={15} /></div>{events.length ? <ol className="timeline-list">{events.map((event) => <li className="timeline-item" key={event.id}><div className="timeline-marker" /><div className="timeline-event-copy"><div className="timeline-event-heading"><strong>{event.title}</strong><span>{event.date || "Дата не указана"}</span></div><small>{timelineEventLabel(event)}{event.date && event.datePrecision !== "unknown" ? ` · ${timelinePrecisionLabel[event.datePrecision] || ""}` : ""}{event.place ? ` · ${event.place}` : ""}</small>{event.description && <p>{event.description}</p>}{event.source && <em>Источник: {event.source}</em>}</div></li>)}</ol> : <p className="empty-relation">События ещё не добавлены</p>}</section>;
+}
+
 function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRelative, onManageRelationships, onCalculateRelationship, onShowOnMap, onDelete, onMoveSiblingOrder }) {
   if (!person) return <div className="detail-content empty-tree-state"><h2>Дерево пока пустое</h2><p>Добавьте первого человека, даже если известны только отдельные сведения.</p><button type="button" className="button button-primary" onClick={() => onAddRelative("")}><Plus size={18} /> Добавить человека</button></div>;
   const displayName = personDisplayName(person);
@@ -306,7 +334,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   const parents = parentLinks.map((link) => {
     const parent = find(link.personId);
     const roles = parentRelationshipRoles(link.type, parent, person);
-    return { person: parent, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, relationshipId: link.id || makeParentLinkId(person.id, link.personId, link.type) };
+    return { person: parent, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, source: link.source, relationshipId: link.id || makeParentLinkId(person.id, link.personId, link.type) };
   }).filter((item) => item.person);
   const relatedPartnerships = partnerships.filter((partnership) => partnership.personIds.includes(person.id));
   const partnerIds = [...new Set([...person.partnerIds, ...relatedPartnerships.flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id))])];
@@ -315,19 +343,19 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
     const partnership = [...partnerships].reverse().find((item) => item.personIds.includes(person.id) && item.personIds.includes(partnerId));
     const currentRole = partnerRole(person, partnership);
     const inverseRole = partnerRole(partner, partnership);
-    return { person: partner, meta: `${partnershipDescription(partnership)} · вы для него: ${currentRole} · он/она для вас: ${inverseRole}`, relationshipId: partnership?.id || `partnership-${[person.id, partnerId].sort().join("-")}` };
+    return { person: partner, meta: `${partnershipDescription(partnership)} · вы для него: ${currentRole} · он/она для вас: ${inverseRole}`, source: partnership?.source, relationshipId: partnership?.id || `partnership-${[person.id, partnerId].sort().join("-")}` };
   }).filter((item) => item.person);
   const children = person.childIds.map((childId) => {
     const child = find(childId);
     const parentLink = child?.parentLinks?.find((link) => link.personId === person.id);
     const type = parentLink?.type || "biological";
     const roles = childRelationshipRoles(type, person, child);
-    return { person: child, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, relationshipId: parentLink?.id || makeParentLinkId(child?.id || childId, person.id, type) };
+    return { person: child, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, source: parentLink?.source, relationshipId: parentLink?.id || makeParentLinkId(child?.id || childId, person.id, type) };
   }).filter((item) => item.person);
   const siblingLinks = person.siblingLinks?.length ? person.siblingLinks : (person.siblingIds || []).map((siblingId) => ({ id: makeSiblingLinkId(person.id, siblingId, "biological"), personId: siblingId, type: "biological" }));
   const siblingItems = siblingLinks.map((link) => {
     const sibling = find(link.personId);
-    return { person: sibling, meta: siblingTypeLabel[link.type] || relationTypeLabel.unknown, relationshipId: link.id || makeSiblingLinkId(person.id, link.personId, link.type || "unknown") };
+    return { person: sibling, meta: siblingTypeLabel[link.type] || relationTypeLabel.unknown, source: link.source, relationshipId: link.id || makeSiblingLinkId(person.id, link.personId, link.type || "unknown") };
   }).filter((item) => item.person);
   const siblingPeople = orderSiblingMembers(siblingItems.map((item) => item.person));
   const siblings = siblingPeople.map((sibling) => siblingItems.find((item) => item.person.id === sibling.id)).filter(Boolean);
@@ -335,7 +363,9 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   return (
     <div className="detail-content">
       <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div></div><div className="profile-actions"><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
-       <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><PencilSimple size={16} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Девичья фамилия</dt><dd>{person.maidenName || "—"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
+      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><PencilSimple size={16} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Девичья фамилия</dt><dd>{person.maidenName || "—"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
+      <FactSourcesSection person={person} />
+      <TimelineSection person={person} />
       <RelationSection title="Родители" items={parents} onSelect={onSelect} emptyText="Родители ещё не добавлены" />
       <RelationSection title="Супруги и партнёры" items={partners} onSelect={onSelect} emptyText="Супруги и партнёры ещё не добавлены" />
       <RelationSection title="Братья и сёстры" items={siblings} onSelect={onSelect} emptyText="Братья и сёстры ещё не добавлены" />
@@ -378,6 +408,53 @@ function RelationshipCalculatorModal({ people, partnerships, initialSourceId, on
   );
 }
 
+function FactSourcesEditor({ sources, error, onChange }) {
+  const safeSources = sources && typeof sources === "object" && !Array.isArray(sources) ? sources : {};
+  const entries = Object.entries(safeSources);
+  const addSource = () => {
+    const next = FACT_SOURCE_OPTIONS.find((item) => !Object.hasOwn(safeSources, item.value));
+    if (next) onChange({ ...safeSources, [next.value]: "" });
+  };
+  const changeFact = (oldFact, newFact) => {
+    const next = { ...safeSources, [newFact]: safeSources[oldFact] || "" };
+    if (oldFact !== newFact) delete next[oldFact];
+    onChange(next);
+  };
+  const removeSource = (fact) => {
+    const next = { ...safeSources };
+    delete next[fact];
+    onChange(next);
+  };
+  return <div className={`field field-full fact-sources-editor ${error ? "has-error" : ""}`}>
+    <div className="timeline-editor-heading"><span>Источники отдельных сведений <em>необязательно</em></span><small>Укажите, откуда взята конкретная дата, фамилия, профессия или биография.</small></div>
+    {entries.length > 0 && <div className="fact-source-list">{entries.map(([fact, source], index) => <div className="fact-source-row" key={fact}>
+      <select value={fact} onChange={(event) => changeFact(fact, event.target.value)} aria-label={`Тип источника ${index + 1}`}>{FACT_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value} disabled={Object.hasOwn(safeSources, option.value) && option.value !== fact}>{option.label}</option>)}</select>
+      <input value={source || ""} maxLength={MAX_EVENT_SOURCE} onChange={(event) => onChange({ ...safeSources, [fact]: event.target.value })} placeholder="Например, рассказала мама" aria-label={`Источник для поля ${factSourceLabel[fact] || fact}`} />
+      <button type="button" className="icon-button custom-field-remove" onClick={() => removeSource(fact)} aria-label={`Удалить источник ${index + 1}`} title="Удалить источник"><Trash size={16} /></button>
+    </div>)}</div>}
+    <button type="button" className="custom-field-add" onClick={addSource} disabled={entries.length >= FACT_SOURCE_OPTIONS.length}><Plus size={16} /> Добавить источник</button>
+    {error && <small className="field-error">{error}</small>}
+  </div>;
+}
+
+function TimelineEditor({ events, error, onChange }) {
+  const safeEvents = Array.isArray(events) ? events : [];
+  const updateEvent = (index, field, value) => onChange(safeEvents.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
+  const addEvent = () => {
+    if (safeEvents.length >= MAX_TIMELINE_EVENTS) return;
+    onChange([...safeEvents, { id: `event-draft-${safeEvents.length + 1}`, type: "other", title: "", date: "", datePrecision: "year", place: "", description: "", source: "" }]);
+  };
+  return <div className={`field field-full timeline-editor ${error ? "has-error" : ""}`}>
+    <div className="timeline-editor-heading"><span>События жизни <em>необязательно</em></span><small>Добавляйте важные события с датой, местом, описанием и отдельным источником.</small></div>
+    {safeEvents.length > 0 && <div className="timeline-event-editor-list">{safeEvents.map((event, index) => <div className="timeline-event-editor" key={event.id || index}>
+      <div className="timeline-event-editor-header"><strong>Событие {index + 1}</strong><button type="button" className="icon-button custom-field-remove" onClick={() => onChange(safeEvents.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Удалить событие ${index + 1}`} title="Удалить событие"><Trash size={16} /></button></div>
+      <div className="timeline-event-editor-grid"><label className="field"><span>Тип</span><select value={event.type || "other"} onChange={(input) => updateEvent(index, "type", input.target.value)}>{TIMELINE_EVENT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label><label className="field"><span>Название</span><input value={event.title || ""} maxLength={MAX_EVENT_TITLE} onChange={(input) => updateEvent(index, "title", input.target.value)} placeholder="Например, переехал в Новосибирск" /></label><label className="field"><span>Дата</span><input value={event.date || ""} maxLength={MAX_EVENT_DATE} onChange={(input) => updateEvent(index, "date", input.target.value)} placeholder="Например, 1945 или около 1945" /></label><label className="field"><span>Точность</span><select value={event.datePrecision || "unknown"} onChange={(input) => updateEvent(index, "datePrecision", input.target.value)}><option value="exact">Точная дата</option><option value="year">Только год</option><option value="approximate">Примерно</option><option value="range">Диапазон</option><option value="unknown">Неизвестно</option></select></label><label className="field"><span>Место</span><input value={event.place || ""} maxLength={MAX_EVENT_PLACE} onChange={(input) => updateEvent(index, "place", input.target.value)} placeholder="Город или страна" /></label><label className="field"><span>Источник</span><input value={event.source || ""} maxLength={MAX_EVENT_SOURCE} onChange={(input) => updateEvent(index, "source", input.target.value)} placeholder="Откуда это известно" /></label><label className="field field-full"><span>Описание</span><textarea value={event.description || ""} maxLength={MAX_EVENT_DESCRIPTION} rows="2" onChange={(input) => updateEvent(index, "description", input.target.value)} placeholder="Коротко опишите событие" /></label></div>
+    </div>)}</div>}
+    <button type="button" className="custom-field-add" onClick={addEvent} disabled={safeEvents.length >= MAX_TIMELINE_EVENTS}><Plus size={16} /> Добавить событие{safeEvents.length >= MAX_TIMELINE_EVENTS ? ` (максимум ${MAX_TIMELINE_EVENTS})` : ""}</button>
+    {error && <small className="field-error">{error}</small>}
+  </div>;
+}
+
 function CustomFieldsEditor({ fields, error, onChange }) {
   const safeFields = Array.isArray(fields) ? fields : [];
   const updateField = (index, field, value) => onChange(safeFields.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
@@ -398,7 +475,7 @@ function CustomFieldsEditor({ fields, error, onChange }) {
   </div>;
 }
 
-function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partnershipType, connectionTargetId, unknownParent, singleKnownParent, outOfMarriage, siblingWithoutParents, people, onChange, onRelationChange, onRelationshipTypeChange, onPartnershipTypeChange, onConnectionTargetChange, onUnknownParentChange, onSingleKnownParentChange, onOutOfMarriageChange, onSiblingWithoutParentsChange, onSave, onCancel }) {
+function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partnershipType, connectionTargetId, relationshipSource, unknownParent, singleKnownParent, outOfMarriage, siblingWithoutParents, people, onChange, onRelationChange, onRelationshipTypeChange, onPartnershipTypeChange, onConnectionTargetChange, onRelationshipSourceChange, onUnknownParentChange, onSingleKnownParentChange, onOutOfMarriageChange, onSiblingWithoutParentsChange, onSave, onCancel }) {
   const [errors, setErrors] = useState({});
   const [wizardStep, setWizardStep] = useState(isNew ? 1 : 2);
   const photoInputRef = useRef(null);
@@ -452,7 +529,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
     reader.readAsDataURL(file);
   };
   const handleSave = (addAnother = false) => {
-    const nextErrors = validatePersonDraft(draft, { isNew, relationshipMode, connectionTargetId });
+    const nextErrors = validatePersonDraft(draft, { isNew, relationshipMode, connectionTargetId, relationshipSource });
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
     onSave({ addAnother });
@@ -466,7 +543,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
       setWizardStep(2);
       return;
     }
-    const nextErrors = validatePersonDraft(draft, { isNew, relationshipMode, connectionTargetId });
+    const nextErrors = validatePersonDraft(draft, { isNew, relationshipMode, connectionTargetId, relationshipSource });
     setErrors(nextErrors);
     if (!Object.keys(nextErrors).length) setWizardStep(3);
   };
@@ -487,6 +564,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
       {isNew && <div className="wizard-progress" aria-label={`Шаг ${wizardStep} из 3`}><div className={wizardStep >= 1 ? "current" : ""}><span>1</span><strong>Связь</strong></div><div className={wizardStep >= 2 ? "current" : ""}><span>2</span><strong>Сведения</strong></div><div className={wizardStep >= 3 ? "current" : ""}><span>3</span><strong>Проверка</strong></div></div>}
       {(!isNew || wizardStep !== 3) && <div className="form-grid">
         {isNew && wizardStep === 1 && <div className="field field-full connection-field wizard-step"><div className="wizard-step-heading"><span className="eyebrow">Шаг 1 из 3</span><strong>Сначала определим место человека в семье</strong><small>Выберите готовый сценарий. Неполные сведения — это нормально: их можно дополнить позже.</small></div><span>Кем будет новый человек? <em>необязательно</em></span><div className="wizard-relation-list"><button type="button" className={`wizard-relation-choice ${relationshipMode === "" ? "selected" : ""}`} onClick={() => changeRelationMode("")}><strong>Без связи</strong><small>Добавить отдельно</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "parent" && !unknownParent ? "selected" : ""}`} onClick={() => changeRelationMode("parent")}><strong>Родитель</strong><small>Родитель выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "parent" && unknownParent ? "selected" : ""}`} onClick={chooseUnknownParent}><strong>Неизвестный родитель</strong><small>Создать родителя без имени</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "child" ? "selected" : ""}`} onClick={() => changeRelationMode("child")}><strong>Ребёнок</strong><small>Ребёнок выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "sibling" ? "selected" : ""}`} onClick={() => changeRelationMode("sibling")}><strong>Брат или сестра</strong><small>Связь без обязательных родителей</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "partner" ? "selected" : ""}`} onClick={() => changeRelationMode("partner")}><strong>Супруг или партнёр</strong><small>Можно добавить несколько союзов</small></button></div>{relationshipMode && relationshipMode !== "partner" && <><span className="nested-field-label">{relationshipMode === "sibling" ? "Вид связи между братом и сестрой" : "Вид родственной связи"}</span><div className="date-options relation-options">{relationshipMode === "sibling" ? <><button type="button" className={`date-option ${relationshipType === "biological" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("biological")}>Родной</button><button type="button" className={`date-option ${relationshipType === "half" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("half")}>Неполнородный</button><button type="button" className={`date-option ${relationshipType === "step" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("step")}>Сводный</button><button type="button" className={`date-option ${relationshipType === "unknown" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("unknown")}>Неизвестно</button></> : <><button type="button" className={`date-option ${relationshipType === "biological" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("biological")}>Биологическая</button><button type="button" className={`date-option ${relationshipType === "adoptive" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("adoptive")}>Усыновление</button><button type="button" className={`date-option ${relationshipType === "step" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("step")}>Степ-родство</button><button type="button" className={`date-option ${relationshipType === "guardian" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("guardian")}>Опекунство</button><button type="button" className={`date-option ${relationshipType === "unknown" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("unknown")}>Неизвестно</button></>}</div></>}{relationshipMode === "child" && <div className="wizard-scenario-box"><span className="nested-field-label">Особенности ситуации — необязательно</span><label className="wizard-scenario-option"><input type="checkbox" checked={singleKnownParent} onChange={(event) => onSingleKnownParentChange(event.target.checked)} /><span><strong>Известен только один родитель</strong><small>Второй родитель не создаётся и не добавляется автоматически.</small></span></label><label className="wizard-scenario-option"><input type="checkbox" checked={outOfMarriage} onChange={(event) => onOutOfMarriageChange(event.target.checked)} /><span><strong>Ребёнок вне брака</strong><small>Отметка сохраняется отдельно; брак между людьми не создаётся.</small></span></label></div>}{relationshipMode === "sibling" && <div className="wizard-scenario-box"><span className="nested-field-label">Неполные сведения — необязательно</span><label className="wizard-scenario-option"><input type="checkbox" checked={siblingWithoutParents} onChange={(event) => onSiblingWithoutParentsChange(event.target.checked)} /><span><strong>Добавить без указания родителей</strong><small>Создаётся только связь брата или сестры; родителей можно добавить позже.</small></span></label></div>}{relationshipMode === "parent" && unknownParent && <div className="wizard-scenario-note"><strong>Будет создана запись «Неизвестный человек».</strong><small>Она будет связана как родитель выбранного человека, а имя и остальные сведения можно заполнить позже.</small></div>}{relationshipMode === "partner" && <div className="wizard-scenario-note"><strong>Можно добавить несколько партнёрств.</strong><small>После сохранения нажмите «Сохранить и добавить ещё одного»: текущий выбранный человек останется целью новой связи.</small></div>}<label className="nested-field"><span>С кем установить связь</span><select value={relationshipMode ? connectionTargetId : ""} disabled={!relationshipMode} onChange={(event) => changeConnectionTarget(event.target.value)}><option value="">Сначала выберите человека</option>{targetOptions.map((person) => <option key={person.id} value={person.id}>{personDisplayName(person)}{person.year ? ` · ${person.year}` : ""}</option>)}</select></label>{errors.connectionTargetId && <small className="field-error">{errors.connectionTargetId}</small>}<small className="field-hint">{relationDescription}</small></div>}
+        {isNew && wizardStep === 1 && relationshipMode && <label className="field field-full relationship-source-field"><span>Источник связи <em>необязательно</em></span><input value={relationshipSource || ""} maxLength={MAX_EVENT_SOURCE} onChange={(event) => onRelationshipSourceChange(event.target.value)} placeholder="Например, семейный архив" />{errors.relationshipSource && <small className="field-error">{errors.relationshipSource}</small>}</label>}
         {(!isNew || wizardStep === 2) && <>
         <label className="unknown-person-toggle"><input type="checkbox" checked={displayUnknown} disabled={unknownParent} onChange={(event) => update("isUnknown", event.target.checked)} /><span><strong>{unknownParent ? "Неизвестный родитель" : "Неизвестный человек"}</strong><small>{unknownParent ? "ФИО можно оставить пустым: запись уже будет связана с выбранным человеком." : "Оставьте ФИО пустым, если нужно создать связь без имени."}</small></span></label>
         <label className={`field field-full ${errors.name ? "has-error" : ""}`}><span>ФИО <em>необязательно</em></span><input autoFocus value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder={displayUnknown ? "Можно оставить пустым" : "Например, Иван Петров"} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
@@ -500,6 +578,8 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <label className={`field ${errors.source ? "has-error" : ""}`}><span>Источник сведений <em>необязательно</em></span><input value={draft.source || ""} onChange={(event) => update("source", event.target.value)} placeholder="Например, рассказала мама" aria-invalid={Boolean(errors.source)} />{errors.source && <small className="field-error">{errors.source}</small>}</label>
         <label className="field"><span>Достоверность</span><select value={draft.confidence || "unknown"} onChange={(event) => update("confidence", event.target.value)}>{PERSON_CONFIDENCE_LEVELS.map((level) => <option key={level} value={level}>{confidenceLabel[level]}</option>)}</select></label>
         <CustomFieldsEditor fields={draft.customFields} error={errors.customFields} onChange={(value) => update("customFields", value)} />
+        <FactSourcesEditor sources={draft.factSources} error={errors.factSources} onChange={(value) => update("factSources", value)} />
+        <TimelineEditor events={draft.timelineEvents} error={errors.timelineEvents} onChange={(value) => update("timelineEvents", value)} />
         </>}
       </div>}
       {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{displayUnknown ? "Неизвестный человек" : personDisplayName(draft)}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь и семейная ситуация</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
@@ -509,7 +589,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
 }
 
 function RelationshipEditor({ person, people, partnerships, onSave, onDeleteRelationship, onCancel }) {
-  const [draft, setDraft] = useState({ kind: "parent", targetId: people.find((item) => item.id !== person.id)?.id || "", parentType: "biological", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" });
+  const [draft, setDraft] = useState({ kind: "parent", targetId: people.find((item) => item.id !== person.id)?.id || "", parentType: "biological", source: "", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" });
   const [relationToDelete, setRelationToDelete] = useState("");
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
   const changeKind = (kind) => setDraft((current) => ({ ...current, kind, parentType: kind === "sibling" ? "biological" : (kind === "parent" || kind === "child") ? "biological" : current.parentType }));
@@ -531,6 +611,7 @@ function RelationshipEditor({ person, people, partnerships, onSave, onDeleteRela
       <div className="form-grid">
         <div className="field field-full"><span>Тип связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.kind === "parent" ? "selected" : ""}`} onClick={() => changeKind("parent")}>Родитель</button><button type="button" className={`date-option ${draft.kind === "child" ? "selected" : ""}`} onClick={() => changeKind("child")}>Ребёнок</button><button type="button" className={`date-option ${draft.kind === "sibling" ? "selected" : ""}`} onClick={() => changeKind("sibling")}>Брат/сестра</button><button type="button" className={`date-option ${draft.kind === "marriage" ? "selected" : ""}`} onClick={() => changeKind("marriage")}>Брак</button><button type="button" className={`date-option ${draft.kind === "partnership" ? "selected" : ""}`} onClick={() => changeKind("partnership")}>Партнёрство</button><button type="button" className={`date-option ${draft.kind === "divorce" ? "selected" : ""}`} onClick={() => changeKind("divorce")}>Развод</button></div></div>
         <label className="field field-full"><span>{isDivorce ? "С кем оформить развод" : "С кем установить связь"}</span><select value={targetId} onChange={(event) => update("targetId", event.target.value)}><option value="">Не выбрано</option>{targetOptions.map((item) => <option key={item.id} value={item.id}>{personDisplayName(item)}{item.year ? ` · ${item.year}` : ""}</option>)}</select></label>
+        <label className="field field-full"><span>Источник связи <em>необязательно</em></span><input value={draft.source || ""} maxLength={MAX_EVENT_SOURCE} onChange={(event) => update("source", event.target.value)} placeholder="Например, семейный архив" /></label>
         {isParent && <div className="field field-full"><span>Происхождение связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.parentType === "biological" ? "selected" : ""}`} onClick={() => update("parentType", "biological")}>Биологическая</button><button type="button" className={`date-option ${draft.parentType === "adoptive" ? "selected" : ""}`} onClick={() => update("parentType", "adoptive")}>Усыновление</button><button type="button" className={`date-option ${draft.parentType === "step" ? "selected" : ""}`} onClick={() => update("parentType", "step")}>Степ-родство</button><button type="button" className={`date-option ${draft.parentType === "guardian" ? "selected" : ""}`} onClick={() => update("parentType", "guardian")}>Опекунство</button><button type="button" className={`date-option ${draft.parentType === "unknown" ? "selected" : ""}`} onClick={() => update("parentType", "unknown")}>Неизвестно</button></div><small className="field-hint">Можно указать биологическую связь, усыновление, опекунство, отчимство/мачеху или оставить происхождение неизвестным.</small></div>}
         {isSibling && <div className="field field-full"><span>Вид связи между братом и сестрой</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.parentType === "biological" ? "selected" : ""}`} onClick={() => update("parentType", "biological")}>Родной</button><button type="button" className={`date-option ${draft.parentType === "half" ? "selected" : ""}`} onClick={() => update("parentType", "half")}>Неполнородный</button><button type="button" className={`date-option ${draft.parentType === "step" ? "selected" : ""}`} onClick={() => update("parentType", "step")}>Сводный</button><button type="button" className={`date-option ${draft.parentType === "unknown" ? "selected" : ""}`} onClick={() => update("parentType", "unknown")}>Неизвестно</button></div><small className="field-hint">Неполнородные — общий только отец или только мать; сводные — без общего биологического родителя.</small></div>}
         {isPartnership && <><label className="field field-full"><span>{isDivorce ? "Дата развода" : "Дата начала отношений"} <em>необязательно</em></span><input value={dateValue} onChange={(event) => update(isDivorce ? "endDate" : "startDate", event.target.value)} placeholder="Точный день или год" /></label><div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${datePrecision === "exact" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${datePrecision === "year" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "year")}>Только год</button><button type="button" className={`date-option ${datePrecision === "approximate" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${datePrecision === "unknown" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "unknown")}>Неизвестно</button></div></div></>}
@@ -1222,6 +1303,7 @@ export function App() {
   const [relationshipType, setRelationshipType] = useState("biological");
   const [partnershipType, setPartnershipType] = useState("marriage");
   const [connectionTargetId, setConnectionTargetId] = useState("");
+  const [relationshipSource, setRelationshipSource] = useState("");
   const [unknownParent, setUnknownParent] = useState(false);
   const [singleKnownParent, setSingleKnownParent] = useState(false);
   const [outOfMarriage, setOutOfMarriage] = useState(false);
@@ -1498,6 +1580,7 @@ export function App() {
     setRelationshipType("biological");
     setPartnershipType("marriage");
     setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || "");
+    setRelationshipSource("");
     setUnknownParent(false);
     setSingleKnownParent(contexts.has("single-known-parent"));
     setOutOfMarriage(contexts.has("out-of-marriage"));
@@ -1506,7 +1589,7 @@ export function App() {
     setInspectorOpen(true);
     setEditing(true);
   };
-  const closeInspector = () => { setEditing(false); setRelationshipEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setInspectorOpen(false); };
+  const closeInspector = () => { setEditing(false); setRelationshipEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setRelationshipSource(""); setInspectorOpen(false); };
   const resizeInspectorBy = (delta) => setInspectorWidth((current) => Math.max(300, Math.min(560, current + delta)));
   const startInspectorResize = (event) => {
     if (event.button !== 0) return;
@@ -1552,6 +1635,7 @@ export function App() {
     setRelationshipType("biological");
     setPartnershipType("marriage");
     setConnectionTargetId("");
+    setRelationshipSource("");
     setDeleteConfirmId("");
     setBackups(readBackups());
     setLastBackupAt(backup?.createdAt || null);
@@ -1615,7 +1699,7 @@ export function App() {
     setToastAction({ message, label: "Отменить", onClick: undoAction });
   };
   const savePerson = ({ addAnother = false } = {}) => {
-    const validationErrors = validatePersonDraft(draft, { isNew: !draft?.id, relationshipMode, connectionTargetId });
+    const validationErrors = validatePersonDraft(draft, { isNew: !draft?.id, relationshipMode, connectionTargetId, relationshipSource });
     if (Object.keys(validationErrors).length) { setToast("Не удалось сохранить человека. Причина: некоторые поля заполнены неверно. Следующее действие: исправьте подсвеченные поля и повторите."); return; }
     const isUnknownRecord = Boolean(draft.isUnknown || unknownParent);
     const existingFamilyContext = Array.isArray(draft.familyContext) ? draft.familyContext : [];
@@ -1627,7 +1711,7 @@ export function App() {
     ])];
     const normalizedName = isUnknownRecord ? "" : draft.name.trim() || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
-    const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
+    const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
     if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedId(personToSave.id); setToast("Изменения сохранены"); } else {
       const newId = makeId(); const newPerson = { ...personToSave, id: newId };
       const relationTarget = people.find((person) => person.id === connectionTargetId);
@@ -1636,12 +1720,12 @@ export function App() {
         const next = current.map((person) => ({ ...person, parentIds: [...(person.parentIds || [])], parentLinks: [...(person.parentLinks || (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" })))], partnerIds: [...(person.partnerIds || [])], childIds: [...(person.childIds || [])], siblingIds: [...(person.siblingIds || [])], siblingLinks: [...(person.siblingLinks || (person.siblingIds || []).map((personId) => ({ id: makeSiblingLinkId(person.id, personId, "biological"), personId, type: "biological" })))] }));
         if (relationTarget && relationshipMode === "child") {
           if (selectedRelationType === "biological") newPerson.parentIds = addUniqueId(newPerson.parentIds, relationTarget.id);
-          newPerson.parentLinks = addParentLink(newPerson.parentLinks, relationTarget.id, selectedRelationType, newId);
+          newPerson.parentLinks = addParentLink(newPerson.parentLinks, relationTarget.id, selectedRelationType, newId, relationshipSource);
           next.forEach((person) => { if (person.id === relationTarget.id) person.childIds = addUniqueId(person.childIds, newId); });
         }
         if (relationTarget && relationshipMode === "parent") {
           newPerson.childIds = addUniqueId(newPerson.childIds, relationTarget.id);
-          next.forEach((person) => { if (person.id === relationTarget.id) { if (selectedRelationType === "biological") person.parentIds = addUniqueId(person.parentIds, newId); person.parentLinks = addParentLink(person.parentLinks, newId, selectedRelationType, person.id); } });
+            next.forEach((person) => { if (person.id === relationTarget.id) { if (selectedRelationType === "biological") person.parentIds = addUniqueId(person.parentIds, newId); person.parentLinks = addParentLink(person.parentLinks, newId, selectedRelationType, person.id, relationshipSource); } });
         }
         if (relationTarget && relationshipMode === "partner") {
           newPerson.partnerIds = addUniqueId(newPerson.partnerIds, relationTarget.id);
@@ -1649,16 +1733,16 @@ export function App() {
         }
         if (relationTarget && relationshipMode === "sibling") {
           newPerson.siblingIds = addUniqueId(newPerson.siblingIds, relationTarget.id);
-          newPerson.siblingLinks = addSiblingLink(newPerson.siblingLinks, relationTarget.id, selectedRelationType, newId);
+          newPerson.siblingLinks = addSiblingLink(newPerson.siblingLinks, relationTarget.id, selectedRelationType, newId, relationshipSource);
           next.forEach((person) => {
             if (person.id !== relationTarget.id) return;
             person.siblingIds = addUniqueId(person.siblingIds, newId);
-            person.siblingLinks = addSiblingLink(person.siblingLinks, newId, selectedRelationType, person.id);
+            person.siblingLinks = addSiblingLink(person.siblingLinks, newId, selectedRelationType, person.id, relationshipSource);
           });
         }
         return [...next, newPerson];
       });
-      if (relationTarget && relationshipMode === "partner") setPartnerships((current) => [...current, { id: `partnership-${relationTarget.id}-${newId}`, personIds: [relationTarget.id, newId], type: partnershipType, status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" }]);
+      if (relationTarget && relationshipMode === "partner") setPartnerships((current) => [...current, { id: `partnership-${relationTarget.id}-${newId}`, personIds: [relationTarget.id, newId], type: partnershipType, status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown", source: normalizeSourceValue(relationshipSource) }]);
       setSelectedId(newId);
       if (addAnother) {
         setEditorSessionKey((current) => current + 1);
@@ -1678,9 +1762,9 @@ export function App() {
       } else setToast("Человек добавлен в дерево");
     }
     setDirty(true);
-    if (!addAnother) { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }
+    if (!addAnother) { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setRelationshipSource(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }
   };
-  const saveRelationship = ({ kind, targetId, parentType, startDate, startDatePrecision, endDate, endDatePrecision }) => {
+  const saveRelationship = ({ kind, targetId, parentType, source, startDate, startDatePrecision, endDate, endDatePrecision }) => {
     if (!selectedPerson || !targetId) return;
     if (kind === "parent" || kind === "child") {
       const parentId = kind === "parent" ? targetId : selectedPerson.id;
@@ -1689,7 +1773,7 @@ export function App() {
         if (person.id === childId) {
           const parentIds = parentType === "biological" ? addUniqueId(person.parentIds, parentId) : [...(person.parentIds || [])];
           const existingLinks = person.parentLinks || (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(childId, personId, "biological"), personId, type: "biological" }));
-          return { ...person, parentIds, parentLinks: addParentLink(existingLinks, parentId, parentType, childId) };
+          return { ...person, parentIds, parentLinks: addParentLink(existingLinks, parentId, parentType, childId, source) };
         }
         if (person.id === parentId) return { ...person, childIds: addUniqueId(person.childIds, childId) };
         return person;
@@ -1697,8 +1781,8 @@ export function App() {
       setToast(parentType === "adoptive" ? "Усыновление добавлено" : parentType === "step" ? "Степ-родство добавлено" : parentType === "guardian" ? "Опекунство добавлено" : parentType === "unknown" ? "Связь добавлена без уточнения типа" : "Родственная связь добавлена");
     } else if (kind === "sibling") {
       setPeople((current) => current.map((person) => {
-        if (person.id === selectedPerson.id) return { ...person, siblingIds: addUniqueId(person.siblingIds, targetId), siblingLinks: addSiblingLink(person.siblingLinks, targetId, parentType, person.id) };
-        if (person.id === targetId) return { ...person, siblingIds: addUniqueId(person.siblingIds, selectedPerson.id), siblingLinks: addSiblingLink(person.siblingLinks, selectedPerson.id, parentType, person.id) };
+        if (person.id === selectedPerson.id) return { ...person, siblingIds: addUniqueId(person.siblingIds, targetId), siblingLinks: addSiblingLink(person.siblingLinks, targetId, parentType, person.id, source) };
+        if (person.id === targetId) return { ...person, siblingIds: addUniqueId(person.siblingIds, selectedPerson.id), siblingLinks: addSiblingLink(person.siblingLinks, selectedPerson.id, parentType, person.id, source) };
         return person;
       }));
       setToast(parentType === "half" ? "Неполнородная связь добавлена" : parentType === "step" ? "Сводная связь добавлена" : parentType === "unknown" ? "Связь братьев и сестёр добавлена без уточнения типа" : "Связь братьев и сестёр добавлена");
@@ -1707,15 +1791,15 @@ export function App() {
       const pair = [selectedPerson.id, targetId];
       setPartnerships((current) => {
         const existingIndex = [...current].map((partnership, index) => ({ partnership, index })).reverse().find(({ partnership }) => partnership.status === "active" && pair.every((id) => partnership.personIds.includes(id)))?.index;
-        if (existingIndex !== undefined) return current.map((partnership, index) => index === existingIndex ? { ...partnership, type: kind, startDate: startDate || partnership.startDate || "", startDatePrecision: startDatePrecision || partnership.startDatePrecision || "unknown" } : partnership);
-        return [...current, { id: `partnership-${makeId()}`, personIds: pair, type: kind, status: "active", startDate: startDate || "", startDatePrecision: startDatePrecision || "unknown", endDate: "", endDatePrecision: "unknown" }];
+        if (existingIndex !== undefined) return current.map((partnership, index) => index === existingIndex ? { ...partnership, type: kind, startDate: startDate || partnership.startDate || "", startDatePrecision: startDatePrecision || partnership.startDatePrecision || "unknown", source: normalizeSourceValue(source) || partnership.source || "" } : partnership);
+        return [...current, { id: `partnership-${makeId()}`, personIds: pair, type: kind, status: "active", startDate: startDate || "", startDatePrecision: startDatePrecision || "unknown", endDate: "", endDatePrecision: "unknown", source: normalizeSourceValue(source) }];
       });
       setToast(kind === "marriage" ? "Брак добавлен" : "Партнёрство добавлено");
     } else if (kind === "divorce") {
       setPartnerships((current) => {
         const index = [...current].map((partnership, itemIndex) => ({ partnership, itemIndex })).reverse().find(({ partnership }) => partnership.status === "active" && partnership.personIds.includes(selectedPerson.id) && partnership.personIds.includes(targetId))?.itemIndex;
         if (index === undefined) return current;
-        return current.map((partnership, itemIndex) => itemIndex === index ? { ...partnership, status: "divorced", endDate: endDate || "", endDatePrecision: endDatePrecision || "unknown" } : partnership);
+        return current.map((partnership, itemIndex) => itemIndex === index ? { ...partnership, status: "divorced", endDate: endDate || "", endDatePrecision: endDatePrecision || "unknown", source: normalizeSourceValue(source) || partnership.source || "" } : partnership);
       });
       setToast("Развод отмечен в истории семьи");
     }
@@ -1991,6 +2075,7 @@ export function App() {
     setRelationshipType("biological");
     setPartnershipType("marriage");
     setConnectionTargetId("");
+    setRelationshipSource("");
     setDeleteConfirmId("");
     setNewTreeConfirmOpen(false);
     setReturnToMenuAfterModal("");
@@ -2036,7 +2121,7 @@ export function App() {
          <aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}>
            <div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} />
            <div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>
-           {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} onMoveSiblingOrder={moveSiblingOrder} />}
+           {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} relationshipSource={relationshipSource} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onRelationshipSourceChange={setRelationshipSource} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setRelationshipSource(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} onMoveSiblingOrder={moveSiblingOrder} />}
          </aside>
        </main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
