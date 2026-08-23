@@ -60,13 +60,14 @@ import {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" };
+const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "" };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true };
 
 const initialPartnerships = [];
 
-const relationLabel = { parent: "родителя", child: "ребёнка", partner: "супруга или партнёра" };
-const relationTypeLabel = { biological: "Биологическая связь", adoptive: "Усыновление", step: "Степ-родство" };
+const relationLabel = { parent: "родителя", child: "ребёнка", partner: "супруга или партнёра", sibling: "брата или сестры" };
+const relationTypeLabel = { biological: "Биологическая связь", adoptive: "Усыновление", step: "Степ-родство", guardian: "Опекунство", unknown: "Тип связи неизвестен", half: "Неполнородное родство" };
+const siblingTypeLabel = { biological: "Родной брат или сестра", half: "Единокровный или единоутробный брат/сестра", step: "Сводный брат или сестра", unknown: "Тип связи неизвестен" };
 const partnershipTypeLabel = { marriage: "Брак", partnership: "Партнёрство" };
 const confidenceLabel = { unknown: "Не указана", low: "Низкая", medium: "Средняя", high: "Высокая" };
 
@@ -128,6 +129,20 @@ function addParentLink(links, personId, type, childId = "unknown-person") {
   return [...current, { id: makeParentLinkId(childId, personId, type), personId, type }];
 }
 
+function makeSiblingLinkId(personId, siblingId, type) {
+  return `sibling-link-${personId}-${siblingId}-${type}`;
+}
+
+function addSiblingLink(links, personId, type, siblingId = "unknown-person") {
+  const current = Array.isArray(links) ? links : [];
+  if (current.some((link) => link.personId === personId && link.type === type)) return current;
+  const baseId = makeSiblingLinkId(siblingId, personId, type);
+  let id = baseId;
+  let suffix = 1;
+  while (current.some((link) => link.id === id)) id = `${baseId}-${++suffix}`;
+  return [...current, { id, personId, type }];
+}
+
 function roleByGender(person, male, female, unknown) {
   if (person?.gender === "male") return male;
   if (person?.gender === "female") return female;
@@ -137,6 +152,8 @@ function roleByGender(person, male, female, unknown) {
 function parentRelationshipRoles(type, parent, child) {
   if (type === "step") return { currentRole: roleByGender(parent, "Отчим", "Мачеха", "Отчим/мачеха"), inverseRole: roleByGender(child, "Пасынок", "Падчерица", "Пасынок/падчерица") };
   if (type === "adoptive") return { currentRole: "Усыновитель", inverseRole: "Усыновлённый ребёнок" };
+  if (type === "guardian") return { currentRole: "Опекун", inverseRole: "Подопечный" };
+  if (type === "unknown") return { currentRole: "Родитель или взрослый родственник (тип не указан)", inverseRole: "Ребёнок или подопечный (тип не указан)" };
   return { currentRole: "Биологический родитель", inverseRole: "Биологический ребёнок" };
 }
 
@@ -233,13 +250,19 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
     const roles = childRelationshipRoles(type, person, child);
     return { person: child, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, relationshipId: parentLink?.id || makeParentLinkId(child?.id || childId, person.id, type) };
   }).filter((item) => item.person);
-  const relationIds = [...parents, ...partners, ...children].map((item) => item.relationshipId).filter(Boolean);
+  const siblingLinks = person.siblingLinks?.length ? person.siblingLinks : (person.siblingIds || []).map((siblingId) => ({ id: makeSiblingLinkId(person.id, siblingId, "biological"), personId: siblingId, type: "biological" }));
+  const siblings = siblingLinks.map((link) => {
+    const sibling = find(link.personId);
+    return { person: sibling, meta: siblingTypeLabel[link.type] || relationTypeLabel.unknown, relationshipId: link.id || makeSiblingLinkId(person.id, link.personId, link.type || "unknown") };
+  }).filter((item) => item.person);
+  const relationIds = [...parents, ...partners, ...children, ...siblings].map((item) => item.relationshipId).filter(Boolean);
   return (
     <div className="detail-content">
       <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div></div><div className="profile-actions"><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
       <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><PencilSimple size={16} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Девичья фамилия</dt><dd>{person.maidenName || "—"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
       <RelationSection title="Родители" items={parents} onSelect={onSelect} emptyText="Родители ещё не добавлены" />
       <RelationSection title="Супруги и партнёры" items={partners} onSelect={onSelect} emptyText="Супруги и партнёры ещё не добавлены" />
+      <RelationSection title="Братья и сёстры" items={siblings} onSelect={onSelect} emptyText="Братья и сёстры ещё не добавлены" />
       <RelationSection title="Дети" items={children} onSelect={onSelect} emptyText="Дети ещё не добавлены" />
       <section className="detail-section relationship-identifiers"><div className="section-title-row"><h3>Идентификаторы</h3><Info size={15} /></div><dl className="facts-list"><div><dt>ID человека</dt><dd className="identifier-value">{person.id}</dd></div><div><dt>Связей в панели</dt><dd>{relationIds.length}</dd></div><div><dt>ID связей</dt><dd className="identifier-value">{relationIds.length ? relationIds.join(" · ") : "—"}</dd></div></dl></section>
       <div className="relationship-actions"><button type="button" className="button button-secondary relationship-manage-button" onClick={onManageRelationships}><Link size={18} /> Управлять связями</button><button type="button" className="add-relative-button" onClick={() => onAddRelative("child")}><UserPlus size={20} /><span><strong>Добавить родственника</strong><small>Создать новую запись человека</small></span><CaretRight size={18} /></button><button type="button" className="button delete-person-button" onClick={onDelete}><Trash size={18} /> Удалить человека</button></div>
@@ -310,13 +333,13 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   const targetOptions = people.filter((person) => person.id !== draft.id);
   const relationTarget = targetOptions.find((person) => person.id === connectionTargetId);
   const relationSummary = relationshipMode ? `${relationLabel[relationshipMode]}; ${relationshipMode === "partner" ? partnershipTypeLabel[partnershipType] : relationTypeLabel[relationshipType]}; ${relationTarget ? personDisplayName(relationTarget) : "человек не выбран"}` : "Без связи — её можно добавить позже.";
-  const relationDescription = relationshipMode === "parent" ? (relationshipType === "step" ? "Новый человек станет отчимом или мачехой выбранной записи." : relationshipType === "adoptive" ? "Новый человек станет усыновителем выбранной записи." : "Новый человек станет биологическим родителем выбранной записи.") : relationshipMode === "child" ? (relationshipType === "step" ? "Новый человек станет пасынком или падчерицей выбранной записи." : relationshipType === "adoptive" ? "Новый человек будет отмечен как усыновлённый ребёнок выбранной записи." : "Новый человек станет биологическим ребёнком выбранной записи.") : relationshipMode === "partner" ? `Новый человек будет добавлен как ${partnershipType === "marriage" ? "супруг или супруга" : "партнёр"}.` : "Можно сохранить человека без связи и добавить её позже.";
+  const relationDescription = relationshipMode === "parent" ? (relationshipType === "step" ? "Новый человек станет отчимом или мачехой выбранной записи." : relationshipType === "adoptive" ? "Новый человек станет усыновителем выбранной записи." : relationshipType === "guardian" ? "Новый человек будет указан как опекун выбранной записи." : relationshipType === "unknown" ? "Родительская связь будет сохранена без уточнения происхождения." : "Новый человек станет биологическим родителем выбранной записи.") : relationshipMode === "child" ? (relationshipType === "step" ? "Новый человек станет пасынком или падчерицей выбранной записи." : relationshipType === "adoptive" ? "Новый человек будет отмечен как усыновлённый ребёнок выбранной записи." : relationshipType === "guardian" ? "Новый человек будет связан с выбранным человеком отношением опеки." : relationshipType === "unknown" ? "Связь с ребёнком будет сохранена без уточнения происхождения." : "Новый человек станет биологическим ребёнком выбранной записи.") : relationshipMode === "sibling" ? `Новый человек будет добавлен как ${siblingTypeLabel[relationshipType]?.toLocaleLowerCase("ru") || "брат или сестра"}.` : relationshipMode === "partner" ? `Новый человек будет добавлен как ${partnershipType === "marriage" ? "супруг или супруга" : "партнёр"}.` : "Можно сохранить человека без связи и добавить её позже.";
   return (
     <div className="editor-content">
       <div className="editor-intro"><div className="editor-photo-wrap"><PersonAvatar person={draft} large /><button type="button" className="photo-action" onClick={() => photoInputRef.current?.click()}><Camera size={16} /> {draft.image ? "Заменить фото" : "Добавить фото"}</button><input ref={photoInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={choosePhoto} />{errors.image && <small className="field-error photo-error">{errors.image}</small>}</div><div><span className="eyebrow">{isNew ? relationText : "Редактирование"}</span><h2>{isNew ? "Добавить человека" : "Изменить сведения"}</h2><p>Заполните только то, что известно. Остальные поля можно оставить пустыми.</p></div></div>
       {isNew && <div className="wizard-progress" aria-label={`Шаг ${wizardStep} из 3`}><div className={wizardStep >= 1 ? "current" : ""}><span>1</span><strong>Связь</strong></div><div className={wizardStep >= 2 ? "current" : ""}><span>2</span><strong>Сведения</strong></div><div className={wizardStep >= 3 ? "current" : ""}><span>3</span><strong>Проверка</strong></div></div>}
       {(!isNew || wizardStep !== 3) && <div className="form-grid">
-        {isNew && wizardStep === 1 && <div className="field field-full connection-field wizard-step"><div className="wizard-step-heading"><span className="eyebrow">Шаг 1 из 3</span><strong>Сначала определим место человека в семье</strong><small>Можно добавить его отдельно, связать с родителем, ребёнком или супругом.</small></div><span>Кем будет новый человек? <em>необязательно</em></span><div className="wizard-relation-list"><button type="button" className={`wizard-relation-choice ${relationshipMode === "" ? "selected" : ""}`} onClick={() => changeRelationMode("")}><strong>Без связи</strong><small>Добавить отдельно</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "parent" ? "selected" : ""}`} onClick={() => changeRelationMode("parent")}><strong>Родитель</strong><small>Родитель выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "child" ? "selected" : ""}`} onClick={() => changeRelationMode("child")}><strong>Ребёнок</strong><small>Ребёнок выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "partner" ? "selected" : ""}`} onClick={() => changeRelationMode("partner")}><strong>Супруг или партнёр</strong><small>Семейный союз с выбранным человеком</small></button></div>{relationshipMode && relationshipMode !== "partner" && <><span className="nested-field-label">Вид родственной связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${relationshipType === "biological" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("biological")}>Биологическая</button><button type="button" className={`date-option ${relationshipType === "adoptive" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("adoptive")}>Усыновление</button><button type="button" className={`date-option ${relationshipType === "step" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("step")}>Степ-родство</button></div></>}{relationshipMode === "partner" && <><span className="nested-field-label">Вид партнёрства</span><div className="date-options relation-options"><button type="button" className={`date-option ${partnershipType === "marriage" ? "selected" : ""}`} onClick={() => onPartnershipTypeChange("marriage")}>Брак</button><button type="button" className={`date-option ${partnershipType === "partnership" ? "selected" : ""}`} onClick={() => onPartnershipTypeChange("partnership")}>Партнёрство</button></div></>}<label className="nested-field"><span>С кем установить связь</span><select value={relationshipMode ? connectionTargetId : ""} disabled={!relationshipMode} onChange={(event) => changeConnectionTarget(event.target.value)}><option value="">Сначала выберите человека</option>{targetOptions.map((person) => <option key={person.id} value={person.id}>{personDisplayName(person)}{person.year ? ` · ${person.year}` : ""}</option>)}</select></label>{errors.connectionTargetId && <small className="field-error">{errors.connectionTargetId}</small>}<small className="field-hint">{relationDescription}</small></div>}
+        {isNew && wizardStep === 1 && <div className="field field-full connection-field wizard-step"><div className="wizard-step-heading"><span className="eyebrow">Шаг 1 из 3</span><strong>Сначала определим место человека в семье</strong><small>Можно добавить его отдельно, связать с родителем, ребёнком, братом/сестрой или супругом.</small></div><span>Кем будет новый человек? <em>необязательно</em></span><div className="wizard-relation-list"><button type="button" className={`wizard-relation-choice ${relationshipMode === "" ? "selected" : ""}`} onClick={() => changeRelationMode("")}><strong>Без связи</strong><small>Добавить отдельно</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "parent" ? "selected" : ""}`} onClick={() => changeRelationMode("parent")}><strong>Родитель</strong><small>Родитель выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "child" ? "selected" : ""}`} onClick={() => changeRelationMode("child")}><strong>Ребёнок</strong><small>Ребёнок выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "sibling" ? "selected" : ""}`} onClick={() => changeRelationMode("sibling")}><strong>Брат или сестра</strong><small>Родственная связь между ровесниками</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "partner" ? "selected" : ""}`} onClick={() => changeRelationMode("partner")}><strong>Супруг или партнёр</strong><small>Семейный союз с выбранным человеком</small></button></div>{relationshipMode && relationshipMode !== "partner" && <><span className="nested-field-label">{relationshipMode === "sibling" ? "Вид связи между братом и сестрой" : "Вид родственной связи"}</span><div className="date-options relation-options">{relationshipMode === "sibling" ? <><button type="button" className={`date-option ${relationshipType === "biological" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("biological")}>Родной</button><button type="button" className={`date-option ${relationshipType === "half" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("half")}>Неполнородный</button><button type="button" className={`date-option ${relationshipType === "step" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("step")}>Сводный</button><button type="button" className={`date-option ${relationshipType === "unknown" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("unknown")}>Неизвестно</button></> : <><button type="button" className={`date-option ${relationshipType === "biological" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("biological")}>Биологическая</button><button type="button" className={`date-option ${relationshipType === "adoptive" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("adoptive")}>Усыновление</button><button type="button" className={`date-option ${relationshipType === "step" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("step")}>Степ-родство</button><button type="button" className={`date-option ${relationshipType === "guardian" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("guardian")}>Опекунство</button><button type="button" className={`date-option ${relationshipType === "unknown" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("unknown")}>Неизвестно</button></>}</div></>}{relationshipMode === "partner" && <><span className="nested-field-label">Вид партнёрства</span><div className="date-options relation-options"><button type="button" className={`date-option ${partnershipType === "marriage" ? "selected" : ""}`} onClick={() => onPartnershipTypeChange("marriage")}>Брак</button><button type="button" className={`date-option ${partnershipType === "partnership" ? "selected" : ""}`} onClick={() => onPartnershipTypeChange("partnership")}>Партнёрство</button></div></>}<label className="nested-field"><span>С кем установить связь</span><select value={relationshipMode ? connectionTargetId : ""} disabled={!relationshipMode} onChange={(event) => changeConnectionTarget(event.target.value)}><option value="">Сначала выберите человека</option>{targetOptions.map((person) => <option key={person.id} value={person.id}>{personDisplayName(person)}{person.year ? ` · ${person.year}` : ""}</option>)}</select></label>{errors.connectionTargetId && <small className="field-error">{errors.connectionTargetId}</small>}<small className="field-hint">{relationDescription}</small></div>}
         {(!isNew || wizardStep === 2) && <>
         <label className="unknown-person-toggle"><input type="checkbox" checked={Boolean(draft.isUnknown)} onChange={(event) => update("isUnknown", event.target.checked)} /><span><strong>Неизвестный человек</strong><small>Оставьте ФИО пустым, если нужно создать связь без имени.</small></span></label>
         <label className={`field field-full ${errors.name ? "has-error" : ""}`}><span>ФИО <em>необязательно</em></span><input autoFocus value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder={draft.isUnknown ? "Можно оставить пустым" : "Например, Иван Петров"} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
@@ -340,11 +363,13 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
 function RelationshipEditor({ person, people, partnerships, onSave, onCancel }) {
   const [draft, setDraft] = useState({ kind: "parent", targetId: people.find((item) => item.id !== person.id)?.id || "", parentType: "biological", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" });
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const changeKind = (kind) => setDraft((current) => ({ ...current, kind, parentType: kind === "sibling" ? "biological" : (kind === "parent" || kind === "child") ? "biological" : current.parentType }));
   const knownPartnerIds = new Set(partnerships.filter((partnership) => partnership.personIds.includes(person.id)).flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id)));
   const currentPartnerIds = new Set([...person.partnerIds.filter((id) => !knownPartnerIds.has(id)), ...partnerships.filter((partnership) => partnership.status === "active" && partnership.personIds.includes(person.id)).flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id))]);
   const targetOptions = people.filter((item) => item.id !== person.id && (draft.kind !== "divorce" || currentPartnerIds.has(item.id)));
   const targetId = targetOptions.some((item) => item.id === draft.targetId) ? draft.targetId : targetOptions[0]?.id || "";
   const isParent = draft.kind === "parent" || draft.kind === "child";
+  const isSibling = draft.kind === "sibling";
   const isPartnership = ["marriage", "partnership", "divorce"].includes(draft.kind);
   const isDivorce = draft.kind === "divorce";
   const dateValue = isDivorce ? draft.endDate : draft.startDate;
@@ -354,9 +379,10 @@ function RelationshipEditor({ person, people, partnerships, onSave, onCancel }) 
     <div className="editor-content relationship-editor">
       <div className="editor-intro relation-editor-intro"><div className="relation-editor-icon"><Link size={34} /></div><div><span className="eyebrow">Семейная связь</span><h2>Управлять связями</h2><p>Свяжите человека с уже существующей записью или добавьте семейное событие.</p></div></div>
       <div className="form-grid">
-        <div className="field field-full"><span>Тип связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.kind === "parent" ? "selected" : ""}`} onClick={() => update("kind", "parent")}>Родитель</button><button type="button" className={`date-option ${draft.kind === "child" ? "selected" : ""}`} onClick={() => update("kind", "child")}>Ребёнок</button><button type="button" className={`date-option ${draft.kind === "marriage" ? "selected" : ""}`} onClick={() => update("kind", "marriage")}>Брак</button><button type="button" className={`date-option ${draft.kind === "partnership" ? "selected" : ""}`} onClick={() => update("kind", "partnership")}>Партнёрство</button><button type="button" className={`date-option ${draft.kind === "divorce" ? "selected" : ""}`} onClick={() => update("kind", "divorce")}>Развод</button></div></div>
+        <div className="field field-full"><span>Тип связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.kind === "parent" ? "selected" : ""}`} onClick={() => changeKind("parent")}>Родитель</button><button type="button" className={`date-option ${draft.kind === "child" ? "selected" : ""}`} onClick={() => changeKind("child")}>Ребёнок</button><button type="button" className={`date-option ${draft.kind === "sibling" ? "selected" : ""}`} onClick={() => changeKind("sibling")}>Брат/сестра</button><button type="button" className={`date-option ${draft.kind === "marriage" ? "selected" : ""}`} onClick={() => changeKind("marriage")}>Брак</button><button type="button" className={`date-option ${draft.kind === "partnership" ? "selected" : ""}`} onClick={() => changeKind("partnership")}>Партнёрство</button><button type="button" className={`date-option ${draft.kind === "divorce" ? "selected" : ""}`} onClick={() => changeKind("divorce")}>Развод</button></div></div>
         <label className="field field-full"><span>{isDivorce ? "С кем оформить развод" : "С кем установить связь"}</span><select value={targetId} onChange={(event) => update("targetId", event.target.value)}><option value="">Не выбрано</option>{targetOptions.map((item) => <option key={item.id} value={item.id}>{personDisplayName(item)}{item.year ? ` · ${item.year}` : ""}</option>)}</select></label>
-        {isParent && <div className="field field-full"><span>Происхождение связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.parentType === "biological" ? "selected" : ""}`} onClick={() => update("parentType", "biological")}>Биологическая</button><button type="button" className={`date-option ${draft.parentType === "adoptive" ? "selected" : ""}`} onClick={() => update("parentType", "adoptive")}>Усыновление</button><button type="button" className={`date-option ${draft.parentType === "step" ? "selected" : ""}`} onClick={() => update("parentType", "step")}>Степ-родство</button></div><small className="field-hint">Степ-родство используется для отчима, мачехи, пасынка и падчерицы.</small></div>}
+        {isParent && <div className="field field-full"><span>Происхождение связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.parentType === "biological" ? "selected" : ""}`} onClick={() => update("parentType", "biological")}>Биологическая</button><button type="button" className={`date-option ${draft.parentType === "adoptive" ? "selected" : ""}`} onClick={() => update("parentType", "adoptive")}>Усыновление</button><button type="button" className={`date-option ${draft.parentType === "step" ? "selected" : ""}`} onClick={() => update("parentType", "step")}>Степ-родство</button><button type="button" className={`date-option ${draft.parentType === "guardian" ? "selected" : ""}`} onClick={() => update("parentType", "guardian")}>Опекунство</button><button type="button" className={`date-option ${draft.parentType === "unknown" ? "selected" : ""}`} onClick={() => update("parentType", "unknown")}>Неизвестно</button></div><small className="field-hint">Можно указать биологическую связь, усыновление, опекунство, отчимство/мачеху или оставить происхождение неизвестным.</small></div>}
+        {isSibling && <div className="field field-full"><span>Вид связи между братом и сестрой</span><div className="date-options relation-options"><button type="button" className={`date-option ${draft.parentType === "biological" ? "selected" : ""}`} onClick={() => update("parentType", "biological")}>Родной</button><button type="button" className={`date-option ${draft.parentType === "half" ? "selected" : ""}`} onClick={() => update("parentType", "half")}>Неполнородный</button><button type="button" className={`date-option ${draft.parentType === "step" ? "selected" : ""}`} onClick={() => update("parentType", "step")}>Сводный</button><button type="button" className={`date-option ${draft.parentType === "unknown" ? "selected" : ""}`} onClick={() => update("parentType", "unknown")}>Неизвестно</button></div><small className="field-hint">Неполнородные — общий только отец или только мать; сводные — без общего биологического родителя.</small></div>}
         {isPartnership && <><label className="field field-full"><span>{isDivorce ? "Дата развода" : "Дата начала отношений"} <em>необязательно</em></span><input value={dateValue} onChange={(event) => update(isDivorce ? "endDate" : "startDate", event.target.value)} placeholder="Точный день или год" /></label><div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${datePrecision === "exact" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${datePrecision === "year" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "year")}>Только год</button><button type="button" className={`date-option ${datePrecision === "approximate" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${datePrecision === "unknown" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "unknown")}>Неизвестно</button></div></div></>}
         {isDivorce && !targetOptions.length && <p className="relationship-hint field-full">У этого человека пока нет супруга или партнёра, для которого можно указать развод.</p>}
       </div>
@@ -599,6 +625,17 @@ function ConfirmModal({ title, description, confirmLabel, onClose, onConfirm }) 
       <section className="backup-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" onClick={(event) => event.stopPropagation()}>
         <div className="backup-modal-header"><div><span className="eyebrow">Подтверждение действия</span><h2 id="confirm-modal-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть подтверждение"><X size={21} /></button></div>
         <div className="confirm-actions"><button type="button" className="button button-ghost" onClick={onClose}>Отмена</button><button type="button" className="button danger-button" onClick={onConfirm}>{confirmLabel}</button></div>
+      </section>
+    </div>
+  );
+}
+
+function UnsavedChangesModal({ onSave, onDiscard, onCancel }) {
+  return (
+    <div className="backup-modal-backdrop" role="presentation" onClick={onCancel}>
+      <section className="backup-modal confirm-modal unsaved-modal" role="dialog" aria-modal="true" aria-labelledby="unsaved-modal-title" onClick={(event) => event.stopPropagation()}>
+        <div className="backup-modal-header"><div><span className="eyebrow">Проект изменён</span><h2 id="unsaved-modal-title">Сохранить изменения?</h2><p>Есть сведения, которые ещё не сохранены в файл проекта. Выберите действие перед продолжением.</p></div><button type="button" className="icon-button backup-close" onClick={onCancel} aria-label="Отменить действие"><X size={21} /></button></div>
+        <div className="unsaved-actions"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button><button type="button" className="button danger-button" onClick={onDiscard}>Не сохранять</button><button type="button" className="button button-primary" onClick={onSave}><FloppyDisk size={18} /> Сохранить и продолжить</button></div>
       </section>
     </div>
   );
@@ -904,6 +941,7 @@ export function App() {
   const [newTreeConfirmOpen, setNewTreeConfirmOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [pendingUnsavedAction, setPendingUnsavedAction] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(loadedSession?.savedAt || null);
   const [lastBackupAt, setLastBackupAt] = useState(() => readBackups()[0]?.createdAt || null);
   const [backups, setBackups] = useState(() => readBackups());
@@ -1016,6 +1054,15 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [dirty, autoSaveEnabled, people, projectMeta, partnerships]);
   useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = "В проекте есть несохранённые изменения.";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
+  useEffect(() => {
     const nextSnapshot = createSnapshot(people, partnerships, projectMeta);
     if (snapshotsEqual(historyRef.current.present, nextSnapshot)) return;
     const nextHistory = recordHistory(historyRef.current, nextSnapshot);
@@ -1091,6 +1138,8 @@ export function App() {
       parentLinks: (person.parentLinks || []).filter((link) => link.personId !== deleteConfirmId),
       partnerIds: (person.partnerIds || []).filter((id) => id !== deleteConfirmId),
       childIds: (person.childIds || []).filter((id) => id !== deleteConfirmId),
+      siblingIds: (person.siblingIds || []).filter((id) => id !== deleteConfirmId),
+      siblingLinks: (person.siblingLinks || []).filter((link) => link.personId !== deleteConfirmId),
     }));
     const nextPartnerships = partnerships.filter((partnership) => !partnership.personIds.includes(deleteConfirmId));
     const fallbackId = [personToDelete.parentIds?.[0], personToDelete.partnerIds?.[0], personToDelete.childIds?.[0]].find((id) => nextPeople.some((person) => person.id === id)) || nextPeople[0]?.id || "";
@@ -1121,7 +1170,7 @@ export function App() {
       const relationTarget = people.find((person) => person.id === connectionTargetId);
       const selectedRelationType = relationshipType || "biological";
       setPeople((current) => {
-        const next = current.map((person) => ({ ...person, parentIds: [...(person.parentIds || [])], parentLinks: [...(person.parentLinks || (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" })))], partnerIds: [...(person.partnerIds || [])], childIds: [...(person.childIds || [])] }));
+        const next = current.map((person) => ({ ...person, parentIds: [...(person.parentIds || [])], parentLinks: [...(person.parentLinks || (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" })))], partnerIds: [...(person.partnerIds || [])], childIds: [...(person.childIds || [])], siblingIds: [...(person.siblingIds || [])], siblingLinks: [...(person.siblingLinks || (person.siblingIds || []).map((personId) => ({ id: makeSiblingLinkId(person.id, personId, "biological"), personId, type: "biological" })))] }));
         if (relationTarget && relationshipMode === "child") {
           if (selectedRelationType === "biological") newPerson.parentIds = addUniqueId(newPerson.parentIds, relationTarget.id);
           newPerson.parentLinks = addParentLink(newPerson.parentLinks, relationTarget.id, selectedRelationType, newId);
@@ -1134,6 +1183,15 @@ export function App() {
         if (relationTarget && relationshipMode === "partner") {
           newPerson.partnerIds = addUniqueId(newPerson.partnerIds, relationTarget.id);
           next.forEach((person) => { if (person.id === relationTarget.id) person.partnerIds = addUniqueId(person.partnerIds, newId); });
+        }
+        if (relationTarget && relationshipMode === "sibling") {
+          newPerson.siblingIds = addUniqueId(newPerson.siblingIds, relationTarget.id);
+          newPerson.siblingLinks = addSiblingLink(newPerson.siblingLinks, relationTarget.id, selectedRelationType, newId);
+          next.forEach((person) => {
+            if (person.id !== relationTarget.id) return;
+            person.siblingIds = addUniqueId(person.siblingIds, newId);
+            person.siblingLinks = addSiblingLink(person.siblingLinks, newId, selectedRelationType, person.id);
+          });
         }
         return [...next, newPerson];
       });
@@ -1157,7 +1215,14 @@ export function App() {
         if (person.id === parentId) return { ...person, childIds: addUniqueId(person.childIds, childId) };
         return person;
       }));
-      setToast(parentType === "adoptive" ? "Усыновление добавлено" : parentType === "step" ? "Степ-родство добавлено" : "Родственная связь добавлена");
+      setToast(parentType === "adoptive" ? "Усыновление добавлено" : parentType === "step" ? "Степ-родство добавлено" : parentType === "guardian" ? "Опекунство добавлено" : parentType === "unknown" ? "Связь добавлена без уточнения типа" : "Родственная связь добавлена");
+    } else if (kind === "sibling") {
+      setPeople((current) => current.map((person) => {
+        if (person.id === selectedPerson.id) return { ...person, siblingIds: addUniqueId(person.siblingIds, targetId), siblingLinks: addSiblingLink(person.siblingLinks, targetId, parentType, person.id) };
+        if (person.id === targetId) return { ...person, siblingIds: addUniqueId(person.siblingIds, selectedPerson.id), siblingLinks: addSiblingLink(person.siblingLinks, selectedPerson.id, parentType, person.id) };
+        return person;
+      }));
+      setToast(parentType === "half" ? "Неполнородная связь добавлена" : parentType === "step" ? "Сводная связь добавлена" : parentType === "unknown" ? "Связь братьев и сестёр добавлена без уточнения типа" : "Связь братьев и сестёр добавлена");
     } else if (kind === "marriage" || kind === "partnership") {
       setPeople((current) => current.map((person) => person.id === selectedPerson.id ? { ...person, partnerIds: addUniqueId(person.partnerIds, targetId) } : person.id === targetId ? { ...person, partnerIds: addUniqueId(person.partnerIds, selectedPerson.id) } : person));
       const pair = [selectedPerson.id, targetId];
@@ -1199,6 +1264,13 @@ export function App() {
       setToast(error.message || "Не удалось сохранить проект");
     }
   };
+  const saveForContinuation = () => {
+    const payload = buildPayload();
+    downloadProjectFile(payload, projectMeta.fileName || "семейное-древо.familytree");
+    const normalized = commitLocalSave(payload);
+    const warningCount = normalized.validationWarnings?.length || 0;
+    setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : "Проект сохранён");
+  };
   const saveCopy = () => {
     const payload = buildPayload();
     downloadProjectFile(payload, "семейное-древо-копия.familytree");
@@ -1207,7 +1279,14 @@ export function App() {
     setLastBackupAt(backup?.createdAt || null);
     setToast("Копия проекта подготовлена");
   };
-  const openProject = () => fileInputRef.current?.click();
+  const openProject = (skipPrompt = false) => {
+    if (!skipPrompt && dirty) {
+      setMainMenuOpen(false);
+      setPendingUnsavedAction({ type: "open" });
+      return;
+    }
+    fileInputRef.current?.click();
+  };
   const handleFileSelected = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1286,7 +1365,26 @@ export function App() {
   };
   const openInstruction = (fromMenu = false) => { setMainMenuOpen(false); setMoreOpen(false); setReturnToMenuAfterModal(fromMenu ? "instruction" : ""); setInstructionOpen(true); };
   const openSettings = (fromMenu = false) => { setMainMenuOpen(false); setMoreOpen(false); setReturnToMenuAfterModal(fromMenu ? "settings" : ""); setSettingsOpen(true); };
-  const createNewTree = (fromMenu = false) => {
+  const continueAfterUnsavedChoice = (saveChanges) => {
+    const action = pendingUnsavedAction;
+    setPendingUnsavedAction(null);
+    try {
+      if (saveChanges) saveForContinuation();
+      else setDirty(false);
+    } catch (error) {
+      setToast(error.message || "Не удалось сохранить изменения");
+      return;
+    }
+    if (action?.type === "open") openProject(true);
+    if (action?.type === "new-tree") createNewTree(action.fromMenu, true);
+    if (action?.type === "exit") exitApplication(true);
+  };
+  const createNewTree = (fromMenu = false, skipPrompt = false) => {
+    if (!skipPrompt && dirty) {
+      setMainMenuOpen(false);
+      setPendingUnsavedAction({ type: "new-tree", fromMenu });
+      return;
+    }
     if (people.length) {
       setMainMenuOpen(false);
       setReturnToMenuAfterModal(fromMenu ? "new-tree" : "");
@@ -1321,7 +1419,12 @@ export function App() {
     setDirty(true);
     setToast("Новое дерево создано");
   };
-  const exitApplication = () => {
+  const exitApplication = (skipPrompt = false) => {
+    if (!skipPrompt && dirty) {
+      setMainMenuOpen(false);
+      setPendingUnsavedAction({ type: "exit" });
+      return;
+    }
     setMainMenuOpen(false);
     if (window.familyTreeDesktop?.close) {
       window.familyTreeDesktop.close();
@@ -1358,8 +1461,9 @@ export function App() {
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
        {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} onSave={saveProjectSettings} onClose={closeSettings} />}
-       {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
+       {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
+       {pendingUnsavedAction && <UnsavedChangesModal onSave={() => continueAfterUnsavedChoice(true)} onDiscard={() => continueAfterUnsavedChoice(false)} onCancel={() => setPendingUnsavedAction(null)} />}
        {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
        {updateStatus && updateOpen && ["available", "downloading", "downloaded"].includes(updateStatus.state) && <UpdateModal status={updateStatus} onClose={() => setUpdateOpen(false)} onDownload={downloadUpdate} onInstall={installUpdate} onOpenReleases={openReleasesPage} />}
      </div>

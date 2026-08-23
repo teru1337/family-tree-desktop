@@ -2,8 +2,8 @@ import { normalizePersonDate, validateDateRecord } from "./dates.js";
 import { inspectFamilyData } from "./data-quality.js";
 
 export const PROJECT_FORMAT = "familytree";
-export const PROJECT_VERSION = 5;
-export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, PROJECT_VERSION];
+export const PROJECT_VERSION = 6;
+export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, 5, PROJECT_VERSION];
 export const PERSON_CONFIDENCE_LEVELS = Object.freeze(["unknown", "low", "medium", "high"]);
 
 // Названия ключей сохраняем прежними, чтобы не потерять рабочие копии после обновления.
@@ -62,8 +62,9 @@ function cloneValue(value) {
 }
 
 const parentLinkTypes = new Set(["biological", "adoptive", "step", "guardian", "unknown"]);
+const siblingLinkTypes = new Set(["biological", "half", "step", "unknown"]);
 const partnershipTypes = new Set(["marriage", "partnership", "unknown"]);
-const relationKinds = new Set(["parent", "partnership"]);
+const relationKinds = new Set(["parent", "partnership", "sibling"]);
 
 function normalizeParentLinks(person) {
   const childId = String(person?.id || "unknown-person");
@@ -107,7 +108,7 @@ function normalizePartnership(record, index, peopleIds, usedIds = new Set()) {
 }
 
 function stripPersonRelations(person) {
-  const { parentIds, parentLinks, partnerIds, childIds, ...profile } = person || {};
+  const { parentIds, parentLinks, partnerIds, childIds, siblingIds, siblingLinks, ...profile } = person || {};
   return profile;
 }
 
@@ -223,6 +224,22 @@ function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
     });
   });
 
+  const siblingPairs = new Set();
+  const addSibling = (firstId, secondId, type, id) => {
+    if (!peopleIds.has(firstId) || !peopleIds.has(secondId) || firstId === secondId) return;
+    const personIds = [firstId, secondId].sort();
+    const normalizedType = siblingLinkTypes.has(type) ? type : "biological";
+    const pairKey = `${personIds.join("::")}::${normalizedType}`;
+    if (siblingPairs.has(pairKey)) return;
+    siblingPairs.add(pairKey);
+    relations.push({ id: String(id || `sibling-link-${personIds.join("-")}-${normalizedType}`), kind: "sibling", personIds, type: normalizedType });
+  };
+  ensureArray(people).forEach((person) => {
+    const personId = String(person?.id || "");
+    ensureArray(person?.siblingLinks).forEach((link) => addSibling(personId, String(link?.personId || ""), link?.type, link?.id));
+    uniqueIds(person?.siblingIds).forEach((siblingId) => addSibling(personId, siblingId, "biological"));
+  });
+
   const addPartnership = (partnership, index) => {
     const peopleIdsSet = peopleIds;
     const normalized = normalizePartnership(partnership, index, peopleIdsSet, new Set(relations.filter((relation) => relation.kind === "partnership").map((relation) => relation.id)));
@@ -261,6 +278,19 @@ function normalizeRelation(record, index, peopleIds, usedIds = new Set(), semant
     usedIds.add(id);
     return { id, kind: "parent", parentId, childId, type };
   }
+  if (kind === "sibling") {
+    const personIds = uniqueIds(record?.personIds).filter((id) => peopleIds.has(id));
+    if (personIds.length !== 2 || personIds[0] === personIds[1]) return null;
+    const sortedIds = [...personIds].sort();
+    const type = siblingLinkTypes.has(record?.type) ? record.type : "biological";
+    const semanticKey = `sibling::${sortedIds.join("::")}::${type}`;
+    if (semanticKeys.has(semanticKey)) return null;
+    semanticKeys.add(semanticKey);
+    let id = String(record?.id || `sibling-link-${sortedIds.join("-")}-${type}`);
+    if (usedIds.has(id)) id = `${id}-${index + 1}`;
+    usedIds.add(id);
+    return { id, kind: "sibling", personIds: sortedIds, type };
+  }
   const partnership = normalizePartnership(record, index, peopleIds, usedIds);
   return partnership ? { ...partnership, kind: "partnership" } : null;
 }
@@ -272,7 +302,7 @@ function normalizeRelations(records, peopleIds) {
 }
 
 function attachLegacyRelations(people, relations) {
-  const prepared = ensureArray(people).map((person) => ({ ...stripPersonRelations(person), parentIds: [], parentLinks: [], partnerIds: [], childIds: [] }));
+  const prepared = ensureArray(people).map((person) => ({ ...stripPersonRelations(person), parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [] }));
   const byId = new Map(prepared.map((person) => [person.id, person]));
   relations.forEach((relation) => {
     if (relation.kind === "parent") {
@@ -290,8 +320,17 @@ function attachLegacyRelations(people, relations) {
         if (person && partnerId) person.partnerIds.push(partnerId);
       });
     }
+    if (relation.kind === "sibling") {
+      relation.personIds.forEach((personId, index, personIds) => {
+        const person = byId.get(personId);
+        const siblingId = personIds[index === 0 ? 1 : 0];
+        if (!person || !siblingId) return;
+        person.siblingIds.push(siblingId);
+        person.siblingLinks.push({ id: relation.id, personId: siblingId, type: relation.type });
+      });
+    }
   });
-  return prepared.map((person) => ({ ...person, parentIds: uniqueIds(person.parentIds), parentLinks: person.parentLinks, partnerIds: uniqueIds(person.partnerIds), childIds: uniqueIds(person.childIds) }));
+  return prepared.map((person) => ({ ...person, parentIds: uniqueIds(person.parentIds), parentLinks: person.parentLinks, partnerIds: uniqueIds(person.partnerIds), childIds: uniqueIds(person.childIds), siblingIds: uniqueIds(person.siblingIds), siblingLinks: person.siblingLinks }));
 }
 
 function relationToPartnership(relation) {
@@ -302,7 +341,7 @@ function relationToPartnership(relation) {
 function migrateProject(raw) {
   if (!raw || typeof raw !== "object") return { payload: raw, migratedFrom: null };
   const version = Number(raw.manifest?.version);
-  if (version === 1 || version === 2 || version === 3 || version === 4) {
+  if (version === 1 || version === 2 || version === 3 || version === 4 || version === 5) {
     const migratedRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
     return {
       payload: {
@@ -355,12 +394,16 @@ export function validateProject(raw) {
 
   raw.people.forEach((person) => {
     const personId = String(person?.id || "человека");
-    [...uniqueIds(person?.parentIds), ...uniqueIds(person?.partnerIds), ...uniqueIds(person?.childIds)].forEach((referenceId) => {
+    [...uniqueIds(person?.parentIds), ...uniqueIds(person?.partnerIds), ...uniqueIds(person?.childIds), ...uniqueIds(person?.siblingIds)].forEach((referenceId) => {
       if (!peopleIds.has(referenceId)) warnings.push(`У записи ${personId} есть ссылка на отсутствующего человека: ${referenceId}.`);
     });
     ensureArray(person?.parentLinks).forEach((link) => {
       if (!link?.personId) warnings.push(`У записи ${personId} есть связь без идентификатора человека.`);
       else if (!peopleIds.has(String(link.personId))) warnings.push(`У записи ${personId} есть связь с отсутствующим человеком: ${link.personId}.`);
+    });
+    ensureArray(person?.siblingLinks).forEach((link) => {
+      if (!link?.personId) warnings.push(`У записи ${personId} есть братская или сестринская связь без идентификатора человека.`);
+      else if (!peopleIds.has(String(link.personId))) warnings.push(`У записи ${personId} есть братская или сестринская связь с отсутствующим человеком: ${link.personId}.`);
     });
     const dateReport = validateDateRecord(person?.birthDate, person?.year, person?.datePrecision);
     if (!dateReport.valid && (person?.birthDate !== undefined || person?.year || person?.datePrecision)) {
@@ -394,6 +437,9 @@ export function validateProject(raw) {
     } else if (relation?.kind === "partnership") {
       const personIds = uniqueIds(relation.personIds);
       if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleIds.has(id))) warnings.push(`Партнёрская связь №${index + 1} неполная и будет пропущена.`);
+    } else if (relation?.kind === "sibling") {
+      const personIds = uniqueIds(relation.personIds);
+      if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleIds.has(id))) warnings.push(`Связь братьев и сестёр №${index + 1} неполная и будет пропущена.`);
     } else warnings.push(`Связь №${index + 1} имеет неизвестный тип и будет пропущена.`);
   });
 
