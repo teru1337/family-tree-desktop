@@ -1,6 +1,6 @@
 export const PROJECT_FORMAT = "familytree";
-export const PROJECT_VERSION = 2;
-export const SUPPORTED_PROJECT_VERSIONS = [1, PROJECT_VERSION];
+export const PROJECT_VERSION = 3;
+export const SUPPORTED_PROJECT_VERSIONS = [1, 2, PROJECT_VERSION];
 
 // Названия ключей сохраняем прежними, чтобы не потерять рабочие копии после обновления.
 export const WORKING_COPY_KEY = "familytree-working-copy-v1";
@@ -48,7 +48,9 @@ function cloneValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-const parentLinkTypes = new Set(["biological", "adoptive", "step"]);
+const parentLinkTypes = new Set(["biological", "adoptive", "step", "guardian", "unknown"]);
+const partnershipTypes = new Set(["marriage", "partnership", "unknown"]);
+const relationKinds = new Set(["parent", "partnership"]);
 
 function normalizeParentLinks(person) {
   const childId = String(person?.id || "unknown-person");
@@ -73,30 +75,16 @@ function normalizeParentLinks(person) {
   return links;
 }
 
-function assignUniqueParentLinkIds(people) {
-  const usedIds = new Set();
-  return people.map((person) => ({
-    ...person,
-    parentLinks: person.parentLinks.map((link, index) => {
-      let id = link.id;
-      if (usedIds.has(id)) id = `${id}-${person.id}-${index + 1}`;
-      usedIds.add(id);
-      return { ...link, id };
-    }),
-  }));
-}
-
 function normalizePartnership(record, index, peopleIds, usedIds = new Set()) {
   const personIds = uniqueIds(record?.personIds).filter((id) => peopleIds.has(id));
-  if (personIds.length !== 2) return null;
+  if (personIds.length !== 2 || personIds[0] === personIds[1]) return null;
   let id = String(record?.id || `partnership-${index + 1}`);
   if (usedIds.has(id)) id = `${id}-${index + 1}`;
   usedIds.add(id);
   return {
-    ...record,
     id,
     personIds,
-    type: record?.type === "partnership" ? "partnership" : "marriage",
+    type: partnershipTypes.has(record?.type) ? record.type : "marriage",
     status: record?.status === "divorced" ? "divorced" : "active",
     startDate: typeof record?.startDate === "string" ? record.startDate : "",
     startDatePrecision: typeof record?.startDatePrecision === "string" ? record.startDatePrecision : "unknown",
@@ -105,34 +93,138 @@ function normalizePartnership(record, index, peopleIds, usedIds = new Set()) {
   };
 }
 
-function derivePartnerships(people) {
-  const peopleIds = new Set(people.map((person) => person.id));
-  const seen = new Set();
-  return people.flatMap((person) => uniqueIds(person.partnerIds).map((partnerId) => {
-    if (!peopleIds.has(partnerId) || partnerId === person.id) return null;
-    const key = [person.id, partnerId].sort().join("::");
-    if (seen.has(key)) return null;
-    seen.add(key);
-    return { id: `partnership-${key}`, personIds: [person.id, partnerId], type: "marriage", status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" };
-  }).filter(Boolean));
+function stripPersonRelations(person) {
+  const { parentIds, parentLinks, partnerIds, childIds, ...profile } = person || {};
+  return profile;
+}
+
+function relationSemanticKey(relation) {
+  if (relation?.kind === "parent") return `parent::${relation.parentId}::${relation.childId}::${relation.type}`;
+  if (relation?.kind === "partnership") return `partnership::${[...(relation.personIds || [])].sort().join("::")}::${relation.id || ""}`;
+  return "";
+}
+
+function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
+  const peopleIds = new Set(ensureArray(people).map((person) => String(person?.id || "")).filter(Boolean));
+  const relations = [];
+  const seenParentRelations = new Set();
+  const seenParentPairs = new Set();
+  const partnershipPairs = new Set();
+  const addParent = (parentId, childId, type, id) => {
+    if (!peopleIds.has(parentId) || !peopleIds.has(childId) || parentId === childId) return;
+    const relation = { id: String(id || `parent-link-${childId}-${parentId}-${type}`), kind: "parent", parentId, childId, type: parentLinkTypes.has(type) ? type : "biological" };
+    const semanticKey = relationSemanticKey(relation);
+    if (seenParentRelations.has(semanticKey)) return;
+    seenParentRelations.add(semanticKey);
+    seenParentPairs.add(`${parentId}::${childId}`);
+    relations.push(relation);
+  };
+  ensureArray(people).forEach((person) => {
+    const childId = String(person?.id || "");
+    normalizeParentLinks(person).forEach((link) => addParent(String(link.personId), childId, link.type, link.id));
+  });
+  ensureArray(people).forEach((person) => {
+    const parentId = String(person?.id || "");
+    uniqueIds(person?.childIds).forEach((childId) => {
+      if (!seenParentPairs.has(`${parentId}::${childId}`)) addParent(parentId, childId, "biological");
+    });
+  });
+
+  const addPartnership = (partnership, index) => {
+    const peopleIdsSet = peopleIds;
+    const normalized = normalizePartnership(partnership, index, peopleIdsSet, new Set(relations.filter((relation) => relation.kind === "partnership").map((relation) => relation.id)));
+    if (!normalized) return;
+    partnershipPairs.add([...normalized.personIds].sort().join("::"));
+    relations.push({ ...normalized, kind: "partnership" });
+  };
+  ensureArray(legacyPartnerships).forEach(addPartnership);
+  ensureArray(people).forEach((person) => uniqueIds(person?.partnerIds).forEach((partnerId) => {
+    if (!peopleIds.has(partnerId) || partnerId === person.id) return;
+    const pairKey = [person.id, partnerId].sort().join("::");
+    if (partnershipPairs.has(pairKey)) return;
+    partnershipPairs.add(pairKey);
+    relations.push({ id: `partnership-${pairKey}`, kind: "partnership", personIds: [person.id, partnerId], type: "marriage", status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" });
+  }));
+  return relations;
+}
+
+function normalizeRelation(record, index, peopleIds, usedIds = new Set(), semanticKeys = new Set()) {
+  const kind = relationKinds.has(record?.kind) ? record.kind : Array.isArray(record?.personIds) ? "partnership" : "parent";
+  if (kind === "parent") {
+    const parentId = String(record?.parentId || record?.fromId || "");
+    const childId = String(record?.childId || record?.toId || "");
+    if (!parentId || !childId || parentId === childId || !peopleIds.has(parentId) || !peopleIds.has(childId)) return null;
+    const type = parentLinkTypes.has(record?.type) ? record.type : "biological";
+    const semanticKey = `parent::${parentId}::${childId}::${type}`;
+    if (semanticKeys.has(semanticKey)) return null;
+    semanticKeys.add(semanticKey);
+    let id = String(record?.id || `parent-link-${childId}-${parentId}-${type}`);
+    if (usedIds.has(id)) {
+      let suffix = 1;
+      const baseId = id;
+      id = `${baseId}-${childId}-${suffix}`;
+      while (usedIds.has(id)) id = `${baseId}-${childId}-${++suffix}`;
+    }
+    usedIds.add(id);
+    return { id, kind: "parent", parentId, childId, type };
+  }
+  const partnership = normalizePartnership(record, index, peopleIds, usedIds);
+  return partnership ? { ...partnership, kind: "partnership" } : null;
+}
+
+function normalizeRelations(records, peopleIds) {
+  const usedIds = new Set();
+  const semanticKeys = new Set();
+  return ensureArray(records).map((record, index) => normalizeRelation(record, index, peopleIds, usedIds, semanticKeys)).filter(Boolean);
+}
+
+function attachLegacyRelations(people, relations) {
+  const prepared = ensureArray(people).map((person) => ({ ...stripPersonRelations(person), parentIds: [], parentLinks: [], partnerIds: [], childIds: [] }));
+  const byId = new Map(prepared.map((person) => [person.id, person]));
+  relations.forEach((relation) => {
+    if (relation.kind === "parent") {
+      const parent = byId.get(relation.parentId);
+      const child = byId.get(relation.childId);
+      if (!parent || !child) return;
+      child.parentLinks.push({ id: relation.id, personId: relation.parentId, type: relation.type });
+      if (relation.type === "biological") child.parentIds.push(relation.parentId);
+      parent.childIds.push(relation.childId);
+    }
+    if (relation.kind === "partnership") {
+      relation.personIds.forEach((personId, index, personIds) => {
+        const person = byId.get(personId);
+        const partnerId = personIds[index === 0 ? 1 : 0];
+        if (person && partnerId) person.partnerIds.push(partnerId);
+      });
+    }
+  });
+  return prepared.map((person) => ({ ...person, parentIds: uniqueIds(person.parentIds), parentLinks: person.parentLinks, partnerIds: uniqueIds(person.partnerIds), childIds: uniqueIds(person.childIds) }));
+}
+
+function relationToPartnership(relation) {
+  const { kind, ...partnership } = relation;
+  return partnership;
 }
 
 function migrateProject(raw) {
   if (!raw || typeof raw !== "object") return { payload: raw, migratedFrom: null };
   const version = Number(raw.manifest?.version);
-  if (version === 1) {
+  if (version === 1 || version === 2) {
+    const migratedRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
     return {
       payload: {
         ...cloneValue(raw),
+        people: ensureArray(raw.people).map(stripPersonRelations),
+        relations: migratedRelations,
         manifest: {
           ...raw.manifest,
           version: PROJECT_VERSION,
           schemaVersion: PROJECT_VERSION,
-          migratedFrom: 1,
+          migratedFrom: version,
           migratedAt: new Date().toISOString(),
         },
       },
-      migratedFrom: 1,
+      migratedFrom: version,
     };
   }
   return { payload: raw, migratedFrom: null };
@@ -179,6 +271,23 @@ export function validateProject(raw) {
     });
   });
 
+  if (version >= 3 && !Array.isArray(raw.relations)) errors.push("В файле отсутствует единая таблица связей.");
+  const relationIds = new Set();
+  ensureArray(raw.relations).forEach((relation, index) => {
+    const id = String(relation?.id || "");
+    if (!id) warnings.push(`У связи №${index + 1} отсутствует идентификатор; он будет создан автоматически.`);
+    if (id && relationIds.has(id)) warnings.push(`В файле повторяется идентификатор связи: ${id}.`);
+    if (id) relationIds.add(id);
+    if (relation?.kind === "parent") {
+      const parentId = String(relation.parentId || "");
+      const childId = String(relation.childId || "");
+      if (!parentId || !childId || parentId === childId || !peopleIds.has(parentId) || !peopleIds.has(childId)) warnings.push(`Родительская связь №${index + 1} неполная и будет пропущена.`);
+    } else if (relation?.kind === "partnership") {
+      const personIds = uniqueIds(relation.personIds);
+      if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleIds.has(id))) warnings.push(`Партнёрская связь №${index + 1} неполная и будет пропущена.`);
+    } else warnings.push(`Связь №${index + 1} имеет неизвестный тип и будет пропущена.`);
+  });
+
   if (raw.partnerships !== undefined && !Array.isArray(raw.partnerships)) errors.push("Раздел связей супругов повреждён.");
   ensureArray(raw.partnerships).forEach((partnership, index) => {
     const personIds = uniqueIds(partnership?.personIds);
@@ -188,20 +297,18 @@ export function validateProject(raw) {
   return { valid: errors.length === 0, errors, warnings: [...new Set(warnings)], version };
 }
 
-export function createProjectPayload(people, project = {}, partnerships = project.partnerships || []) {
+export function createProjectPayload(people, project = {}, relationships = project.relationships || project.relations || project.partnerships || []) {
   const now = new Date().toISOString();
   const normalizedPeopleInput = ensureArray(people);
-  const usedPartnershipIds = new Set();
-  const normalizedPeople = assignUniqueParentLinkIds(normalizedPeopleInput.map((person) => ({
+  const normalizedPeople = normalizedPeopleInput.map((person) => ({
     ...person,
     id: String(person?.id || `person-${Math.random().toString(16).slice(2)}`),
     gender: person?.gender === "male" || person?.gender === "female" ? person.gender : "",
-    parentIds: ensureArray(person.parentIds),
-    partnerIds: ensureArray(person.partnerIds),
-    childIds: ensureArray(person.childIds),
-    parentLinks: normalizeParentLinks(person),
-  })));
+  }));
   const normalizedPeopleIds = new Set(normalizedPeople.map((person) => person.id));
+  const sourceRelations = ensureArray(relationships).some((relation) => relation?.kind) ? relationships : deriveRelationsFromLegacy(normalizedPeople, relationships);
+  const relations = normalizeRelations(sourceRelations, normalizedPeopleIds);
+  const peopleWithCompatibility = attachLegacyRelations(normalizedPeople, relations);
   return {
     manifest: {
       format: PROJECT_FORMAT,
@@ -216,13 +323,14 @@ export function createProjectPayload(people, project = {}, partnerships = projec
       fileName: project.fileName || "семейное-древо.familytree",
       settings: project.settings && typeof project.settings === "object" ? { ...project.settings } : {},
     },
-    people: normalizedPeople,
-    partnerships: ensureArray(partnerships).map((partnership, index) => normalizePartnership(partnership, index, normalizedPeopleIds, usedPartnershipIds)).filter(Boolean),
+    people: peopleWithCompatibility,
+    relations,
+    partnerships: relations.filter((relation) => relation.kind === "partnership").map(relationToPartnership),
   };
 }
 
 export function serializeProject(payload) {
-  return JSON.stringify(payload, null, 2);
+  return JSON.stringify(toPersistedPayload(normalizeProject(payload)), null, 2);
 }
 
 export function normalizeProject(raw) {
@@ -231,7 +339,7 @@ export function normalizeProject(raw) {
   if (!report.valid) throw new Error(formatValidationError(report));
 
   const seenIds = new Set();
-  const people = assignUniqueParentLinkIds(migrated.people.map((person, index) => {
+  const people = migrated.people.map((person, index) => {
     const id = String(person?.id || `imported-${index + 1}`);
     if (seenIds.has(id)) throw new Error("В файле обнаружены повторяющиеся идентификаторы людей.");
     seenIds.add(id);
@@ -241,17 +349,14 @@ export function normalizeProject(raw) {
       name: typeof person?.name === "string" ? person.name : "",
       shortName: typeof person?.shortName === "string" ? person.shortName : (typeof person?.name === "string" ? person.name : ""),
       gender: person?.gender === "male" || person?.gender === "female" ? person.gender : "",
-      parentIds: ensureArray(person?.parentIds),
-      partnerIds: ensureArray(person?.partnerIds),
-      childIds: ensureArray(person?.childIds),
-      parentLinks: normalizeParentLinks(person),
     };
-  }));
+  });
 
   const peopleIds = new Set(people.map((person) => person.id));
-  const usedPartnershipIds = new Set();
-  const importedPartnerships = ensureArray(migrated.partnerships).map((partnership, index) => normalizePartnership(partnership, index, peopleIds, usedPartnershipIds)).filter(Boolean);
-  const partnerships = importedPartnerships.length ? importedPartnerships : derivePartnerships(people);
+  const sourceRelations = Array.isArray(migrated.relations) ? migrated.relations : deriveRelationsFromLegacy(people, migrated.partnerships);
+  const relations = normalizeRelations(sourceRelations, peopleIds);
+  const compatibilityPeople = attachLegacyRelations(people, relations);
+  const partnerships = relations.filter((relation) => relation.kind === "partnership").map(relationToPartnership);
   const validationWarnings = [...report.warnings];
   if (migratedFrom) validationWarnings.unshift(`Формат проекта обновлён с версии ${migratedFrom} до версии ${PROJECT_VERSION}.`);
 
@@ -265,10 +370,24 @@ export function normalizeProject(raw) {
       createdAt: migrated.manifest.createdAt,
       updatedAt: migrated.manifest.updatedAt,
     },
-    people,
+    people: compatibilityPeople,
+    relations,
     partnerships,
     validationWarnings: [...new Set(validationWarnings)],
   };
+}
+
+function toPersistedPayload(normalized) {
+  return {
+    manifest: { ...normalized.manifest, version: PROJECT_VERSION, schemaVersion: PROJECT_VERSION },
+    project: { ...normalized.project },
+    people: ensureArray(normalized.people).map(stripPersonRelations),
+    relations: ensureArray(normalized.relations).map((relation) => ({ ...relation })),
+  };
+}
+
+export function toPersistedProjectPayload(payload) {
+  return toPersistedPayload(normalizeProject(payload));
 }
 
 function readAtomicValue(mainKey, temporaryKey, previousKey) {
@@ -335,7 +454,7 @@ export function readWorkingCopy() {
 export function writeWorkingCopy(payload) {
   if (!storageAvailable()) return payload;
   const normalized = normalizeProject(payload);
-  const envelope = { storageVersion: PROJECT_VERSION, savedAt: new Date().toISOString(), payload: normalized };
+  const envelope = { storageVersion: PROJECT_VERSION, savedAt: new Date().toISOString(), payload: toPersistedPayload(normalized) };
   writeAtomicValue(WORKING_COPY_KEY, WORKING_COPY_TMP_KEY, WORKING_COPY_PREVIOUS_KEY, envelope);
   return normalized;
 }
@@ -373,7 +492,7 @@ export function addBackup(payload, reason = "auto") {
       createdAt: new Date().toISOString(),
       reason,
       peopleCount: normalized.people.length,
-      payload: normalized,
+      payload: toPersistedPayload(normalized),
     };
     const next = [record, ...readBackups()].slice(0, MAX_BACKUPS);
     writeAtomicValue(BACKUPS_KEY, BACKUPS_TMP_KEY, BACKUPS_PREVIOUS_KEY, next);
