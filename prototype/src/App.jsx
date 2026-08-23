@@ -56,39 +56,15 @@ import {
 } from "./exporters.js";
 
 const avatar = {
-  elder: "/assets/portrait-elder.png",
   man: "/assets/portrait-man.png",
-  woman: "/assets/portrait-woman.png",
-  youngMan: "/assets/portrait-young-man.png",
-  youngWoman: "/assets/portrait-young-woman.png",
 };
 
-const initialPeople = [
-  { id: "petr", name: "Пётр Николаевич Петров", shortName: "Пётр Николаевич\nПетров", year: "1938", place: "г. Ярославль", image: avatar.elder, parentIds: [], partnerIds: ["maria"], childIds: ["ivan"], occupation: "Инженер", biography: "Работал на машиностроительном заводе в Ярославле.", maidenName: "" },
-  { id: "maria", name: "Мария Ивановна Петрова (Смирнова)", shortName: "Мария Ивановна\nПетрова (Смирнова)", year: "1940", place: "г. Ярославль", image: avatar.woman, parentIds: [], partnerIds: ["petr"], childIds: ["ivan"], occupation: "Учитель", biography: "Преподавала литературу и собирала семейные истории.", maidenName: "Смирнова" },
-  { id: "nikolai", name: "Николай Васильевич Соколов", shortName: "Николай Васильевич\nСоколов", year: "1936", place: "г. Кострома", image: avatar.elder, parentIds: [], partnerIds: ["lidia"], childIds: ["alexey"], occupation: "", biography: "", maidenName: "" },
-  { id: "lidia", name: "Лидия Андреевна Соколова (Кузнецова)", shortName: "Лидия Андреевна\nСоколова (Кузнецова)", year: "1938", place: "", image: avatar.woman, parentIds: [], partnerIds: ["nikolai"], childIds: ["alexey"], occupation: "", biography: "", maidenName: "Кузнецова" },
-  { id: "ivan", name: "Иван Петров", shortName: "Иван Петров", year: "1963", place: "г. Ярославль, РСФСР", image: avatar.man, parentIds: ["petr", "maria"], partnerIds: ["elena"], childIds: ["dmitry", "anna", "maxim"], occupation: "Инженер", biography: "Сохранял семейные фотографии и записывал воспоминания родственников.", maidenName: "" },
-  { id: "elena", name: "Елена Петрова (Соколова)", shortName: "Елена Петрова\n(Соколова)", year: "1966", place: "г. Ярославль", image: avatar.woman, parentIds: ["alexey", "tatiana"], partnerIds: ["ivan"], childIds: ["dmitry", "anna", "maxim"], occupation: "Врач", biography: "", maidenName: "Соколова" },
-  { id: "alexey", name: "Алексей Соколов", shortName: "Алексей Соколов", year: "1961", place: "г. Кострома", image: avatar.man, parentIds: ["nikolai", "lidia"], partnerIds: ["tatiana"], childIds: ["elena"], occupation: "", biography: "", maidenName: "" },
-  { id: "tatiana", name: "Татьяна Соколова (Новикова)", shortName: "Татьяна Соколова\n(Новикова)", year: "1964", place: "", image: avatar.woman, parentIds: [], partnerIds: ["alexey"], childIds: ["elena"], occupation: "", biography: "", maidenName: "Новикова" },
-  { id: "dmitry", name: "Дмитрий Петров", shortName: "Дмитрий Петров", year: "1988", place: "г. Ярославль", image: avatar.youngMan, parentIds: ["ivan", "elena"], partnerIds: [], childIds: ["eva"], occupation: "", biography: "", maidenName: "" },
-  { id: "anna", name: "Анна Петрова", shortName: "Анна Петрова", year: "1991", place: "г. Ярославль", image: avatar.youngWoman, parentIds: ["ivan", "elena"], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" },
-  { id: "maxim", name: "Максим Петров", shortName: "Максим Петров", year: "1995", place: "", image: avatar.youngMan, parentIds: ["ivan", "elena"], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" },
-  { id: "sofia", name: "София Соколова", shortName: "София Соколова", year: "1990", place: "г. Кострома", image: avatar.youngWoman, parentIds: ["alexey", "tatiana"], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" },
-  { id: "ilya", name: "Илья Соколов", shortName: "Илья Соколов", year: "1993", place: "", image: avatar.youngMan, parentIds: ["alexey", "tatiana"], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" },
-  { id: "eva", name: "Ева Петрова", shortName: "Ева Петрова", year: "2016", place: "г. Ярославль", image: avatar.youngWoman, parentIds: ["dmitry"], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" },
-];
+const initialPeople = [];
 
 const blankPerson = { id: "", name: "", shortName: "", year: "", place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true };
 
-const initialPartnerships = [
-  { id: "partnership-petr-maria", personIds: ["petr", "maria"], type: "marriage", status: "active", startDate: "1987", startDatePrecision: "year", endDate: "", endDatePrecision: "unknown" },
-  { id: "partnership-nikolai-lidia", personIds: ["nikolai", "lidia"], type: "marriage", status: "active", startDate: "1988", startDatePrecision: "year", endDate: "", endDatePrecision: "unknown" },
-  { id: "partnership-ivan-elena", personIds: ["ivan", "elena"], type: "marriage", status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" },
-  { id: "partnership-alexey-tatiana", personIds: ["alexey", "tatiana"], type: "marriage", status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" },
-];
+const initialPartnerships = [];
 
 const relationLabel = { parent: "родителя", child: "ребёнка", partner: "супруга или партнёра" };
 const relationTypeLabel = { biological: "Биологическая связь", adoptive: "Усыновление", step: "Степ-родство" };
