@@ -65,6 +65,12 @@ import { buildTreeLayout } from "./tree-layout.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 
+const BRAND_MARK_SRC = "/branding/family-circle.svg";
+
+function BrandMark({ className = "" }) {
+  return <img className={`brand-mark ${className}`.trim()} src={BRAND_MARK_SRC} alt="" aria-hidden="true" />;
+}
+
 const initialPeople = [];
 
 const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
@@ -899,7 +905,7 @@ function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }
     <div className={`main-menu-backdrop ${closing ? "is-closing" : ""}`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <section className="main-menu-card" role="dialog" aria-modal="true" aria-labelledby="main-menu-title" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="icon-button main-menu-close" onClick={requestClose} aria-label="Закрыть главное меню"><X size={21} /></button>
-        <div className="main-menu-brand"><TreeStructure size={46} weight="fill" /><div><h1 id="main-menu-title">Семейное древо</h1><p>Храните историю семьи на своём компьютере.</p></div></div>
+        <div className="main-menu-brand"><BrandMark className="menu-logo" /><div><h1 id="main-menu-title">Семейное древо</h1><p>Храните историю семьи на своём компьютере.</p></div></div>
         <div className="main-menu-list">
           <button type="button" className="main-menu-action main-menu-action-primary" onClick={onCreate}><Plus size={21} weight="bold" /><span><strong>Создать древо</strong><small>Начать новый семейный проект</small></span><CaretRight size={18} /></button>
           <button type="button" className="main-menu-action" onClick={onLoad}><FolderOpen size={21} /><span><strong>Загрузить древо</strong><small>Открыть сохранённый файл проекта</small></span><CaretRight size={18} /></button>
@@ -2011,9 +2017,9 @@ export function App() {
 
   return (
     <div className={`app-window ${inspectorResizing ? "is-resizing" : ""} ${largeText ? "app-large-text" : ""}`} onClick={() => { if (moreOpen) setMoreOpen(false); }}>
-      <div className="window-bar"><div className="window-title"><TreeStructure size={18} weight="fill" /><span>Семейное древо</span></div><div className="window-controls"><Minus size={15} /><Square size={12} /><X size={15} /></div></div>
+      <div className="window-bar"><div className="window-title"><BrandMark className="window-logo" /><span>Семейное древо</span></div><div className="window-controls"><Minus size={15} /><Square size={12} /><X size={15} /></div></div>
        <header className="app-header" onClick={(event) => event.stopPropagation()}>
-         <button type="button" className="brand brand-button" onClick={() => setMainMenuOpen(true)} aria-label="Открыть главное меню"><TreeStructure size={42} weight="fill" /><span>Семейное древо</span></button>
+         <button type="button" className="brand brand-button" onClick={() => setMainMenuOpen(true)} aria-label="Открыть главное меню"><BrandMark className="brand-logo" /><span>Семейное древо</span></button>
          <div className="header-divider" />
          <button type="button" className="button button-primary add-person-button" onClick={() => openEditor()}><Plus size={20} weight="bold" /> Добавить человека</button>
           <button type="button" className="button button-secondary file-button" onClick={openProject}><FolderOpen size={18} /> Открыть проект</button>

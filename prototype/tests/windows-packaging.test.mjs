@@ -6,10 +6,13 @@ const ignore = await readFile(new URL("../../.gitignore", import.meta.url), "utf
 const workflow = await readFile(new URL("../../.github/workflows/release-windows.yml", import.meta.url), "utf8");
 const mainProcess = await readFile(new URL("../electron/main.cjs", import.meta.url), "utf8");
 const preload = await readFile(new URL("../electron/preload.cjs", import.meta.url), "utf8");
+const indexHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const brandSvg = await readFile(new URL("../public/branding/family-circle.svg", import.meta.url), "utf8");
 
 assert.equal(packageJson.main, "electron/main.cjs");
 assert.equal(packageJson.build.appId, "ru.teru1337.familytree");
 assert.equal(packageJson.build.productName, "Семейное древо");
+assert.equal(packageJson.build.win.icon, "build-resources/family-circle.ico");
 assert.deepEqual(packageJson.build.win.target[0].arch, ["x64"]);
 assert.equal(packageJson.dependencies["electron-updater"], "6.8.9");
 assert.equal(packageJson.build.publish.provider, "github");
@@ -30,6 +33,10 @@ assert.match(mainProcess, /autoUpdater\.checkForUpdates/);
 assert.match(mainProcess, /autoUpdater\.downloadUpdate/);
 assert.match(mainProcess, /mainWindow\.maximize\(\)/);
 assert.match(preload, /family-tree-update-status/);
+assert.match(indexHtml, /branding\/family-circle\.svg/);
+assert.match(brandSvg, /Круг поколений/);
 await access(new URL("../electron/main.cjs", import.meta.url));
 await access(new URL("../electron/preload.cjs", import.meta.url));
+await access(new URL("../public/branding/family-circle.png", import.meta.url));
+await access(new URL("../build-resources/family-circle.ico", import.meta.url));
 console.log("Windows packaging configuration ok: Electron + NSIS x64");

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Круг поколений</title>
+  <desc id="desc">Семейное дерево, соединённое в круг поколений и растущее из книги семейной памяти.</desc>
+  <defs>
+    <g id="person-node">
+      <circle r="58" fill="#829B63"/>
+      <circle cy="-14" r="14" fill="#FFFDF8"/>
+      <path d="M-31 30c3-24 17-34 31-34s28 10 31 34c-18 13-44 13-62 0Z" fill="#FFFDF8"/>
+    </g>
+    <g id="graph-node">
+      <circle r="19" fill="#6D8751"/>
+    </g>
+  </defs>
+
+  <circle cx="512" cy="419" r="351" fill="none" stroke="#6D8751" stroke-width="25" stroke-linecap="round"/>
+
+  <g fill="none" stroke="#6D8751" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M512 843C510 773 511 708 512 641C512 590 512 544 512 486"/>
+    <path d="M512 720C465 676 414 638 347 602C311 582 277 566 236 552"/>
+    <path d="M512 720C559 676 610 638 677 602C713 582 747 566 788 552"/>
+    <path d="M512 642C472 599 439 566 393 530C368 511 346 492 324 464"/>
+    <path d="M512 642C552 599 585 566 631 530C656 511 678 492 700 464"/>
+    <path d="M512 488C512 438 512 382 512 320C512 284 512 250 512 205"/>
+    <path d="M393 530C352 504 321 476 298 438C278 405 267 371 263 332"/>
+    <path d="M631 530C672 504 703 476 726 438C746 405 757 371 761 332"/>
+  </g>
+
+  <g fill="none" stroke="#829B63" stroke-width="18" stroke-linecap="round">
+    <path d="M264 332C330 247 416 214 512 214"/>
+    <path d="M512 214C608 214 694 247 760 332"/>
+    <path d="M236 552C296 613 377 644 452 651"/>
+    <path d="M788 552C728 613 647 644 572 651"/>
+  </g>
+
+  <use href="#person-node" x="512" y="153"/>
+  <use href="#person-node" x="263" y="309"/>
+  <use href="#person-node" x="761" y="309"/>
+  <use href="#person-node" x="337" y="548"/>
+  <use href="#person-node" x="687" y="548"/>
+  <use href="#person-node" x="512" y="451"/>
+
+  <use href="#graph-node" x="512" y="323"/>
+  <use href="#graph-node" x="392" y="530"/>
+  <use href="#graph-node" x="632" y="530"/>
+  <use href="#graph-node" x="324" y="464"/>
+  <circle cx="700" cy="464" r="19" fill="#8A3453"/>
+
+  <g fill="#6D8751">
+    <path d="M324 684c-42-24-66-54-74-91 39 4 70 25 90 62-3 14-8 24-16 29Z"/>
+    <path d="M700 684c42-24 66-54 74-91-39 4-70 25-90 62 3 14 8 24 16 29Z"/>
+    <path d="M423 632c-33-29-47-59-44-91 32 9 55 31 68 66-5 11-13 19-24 25Z"/>
+    <path d="M601 632c33-29 47-59 44-91-32 9-55 31-68 66 5 11 13 19 24 25Z"/>
+  </g>
+
+  <path d="M512 660c-37 43-39 78 0 108 39-30 37-65 0-108Z" fill="#FFFDF8" stroke="#6D8751" stroke-width="15"/>
+
+  <g stroke="#6D8751" stroke-width="15" stroke-linejoin="round">
+    <path d="M512 842C454 791 391 782 316 805l-22 80c84-22 145-9 218 42Z" fill="#FFFDF8"/>
+    <path d="M512 842C570 791 633 782 708 805l22 80c-84-22-145-9-218 42Z" fill="#FFFDF8"/>
+    <path d="M512 842v85" fill="none" stroke-width="19"/>
+    <path d="M294 885c86-19 145-7 218 42" fill="none" stroke-width="11"/>
+    <path d="M730 885c-86-19-145-7-218 42" fill="none" stroke-width="11"/>
+  </g>
+  <circle cx="512" cy="927" r="19" fill="#829B63" stroke="#6D8751" stroke-width="10"/>
+</svg>
