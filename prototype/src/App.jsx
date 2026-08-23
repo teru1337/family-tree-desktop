@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   Camera,
+  ArrowClockwise,
+  ArrowCounterClockwise,
   CaretDown,
   CaretLeft,
   CaretRight,
@@ -42,6 +44,7 @@ import {
   serializeProject,
   writeWorkingCopy,
 } from "./storage.js";
+import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -830,10 +833,46 @@ export function App() {
   const [returnToMenuAfterModal, setReturnToMenuAfterModal] = useState("");
   const [updateStatus, setUpdateStatus] = useState(null);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const historyRef = useRef(null);
+  const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false });
   const fileInputRef = useRef(null);
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
+  if (!historyRef.current) historyRef.current = createHistory(createSnapshot(people, partnerships, projectMeta));
   const treeLayout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
   const searchResults = useMemo(() => { const value = query.trim().toLocaleLowerCase("ru"); if (!value) return []; return people.filter((person) => `${person.name || "Человек без имени"} ${person.place || ""} ${person.year || ""}`.toLocaleLowerCase("ru").includes(value)).slice(0, 6); }, [people, query]);
+  const applyHistorySnapshot = (snapshot) => {
+    setPeople(snapshot.people);
+    setPartnerships(snapshot.partnerships);
+    setProjectMeta(snapshot.projectMeta);
+    const settings = { ...defaultProjectSettings, ...(snapshot.projectMeta.settings || {}) };
+    setTreeStyle(settings.treeStyle || "classic");
+    setShowPhotos(settings.showPhotos !== false);
+    setAutoSaveEnabled(settings.autoSave !== false);
+    setSelectedId((current) => snapshot.people.some((person) => person.id === current) ? current : snapshot.people[0]?.id || "");
+  };
+  const undoAction = () => {
+    const nextHistory = undoHistory(historyRef.current);
+    if (nextHistory === historyRef.current) return;
+    historyRef.current = nextHistory;
+    applyHistorySnapshot(nextHistory.present);
+    setHistoryStatus(getHistoryStatus(nextHistory));
+    setDirty(true);
+    setToast("Последнее действие отменено");
+  };
+  const redoAction = () => {
+    const nextHistory = redoHistory(historyRef.current);
+    if (nextHistory === historyRef.current) return;
+    historyRef.current = nextHistory;
+    applyHistorySnapshot(nextHistory.present);
+    setHistoryStatus(getHistoryStatus(nextHistory));
+    setDirty(true);
+    setToast("Действие повторено");
+  };
+  const resetHistory = (nextPeople, nextPartnerships, nextProjectMeta) => {
+    const nextHistory = createHistory(createSnapshot(nextPeople, nextPartnerships, nextProjectMeta));
+    historyRef.current = nextHistory;
+    setHistoryStatus(getHistoryStatus(nextHistory));
+  };
   const updateViewSetting = (field, value) => {
     setProjectMeta((current) => ({ ...current, settings: { ...defaultProjectSettings, ...(current.settings || {}), [field]: value } }));
     if (field === "treeStyle") setTreeStyle(value);
@@ -895,6 +934,33 @@ export function App() {
     }, 800);
     return () => window.clearTimeout(timeout);
   }, [dirty, autoSaveEnabled, people, projectMeta, partnerships]);
+  useEffect(() => {
+    const nextSnapshot = createSnapshot(people, partnerships, projectMeta);
+    if (snapshotsEqual(historyRef.current.present, nextSnapshot)) return;
+    const nextHistory = recordHistory(historyRef.current, nextSnapshot);
+    historyRef.current = nextHistory;
+    setHistoryStatus(getHistoryStatus(nextHistory));
+  }, [people, partnerships, projectMeta]);
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const tagName = event.target?.tagName?.toLowerCase();
+      if (tagName === "input" || tagName === "textarea" || tagName === "select" || event.target?.isContentEditable) return;
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && event.shiftKey) {
+        event.preventDefault();
+        redoAction();
+      } else if (key === "z") {
+        event.preventDefault();
+        undoAction();
+      } else if (key === "y") {
+        event.preventDefault();
+        redoAction();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [historyStatus]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -1037,7 +1103,6 @@ export function App() {
     setBackups(readBackups());
     setLastBackupAt(backup?.createdAt || null);
     setLastSavedAt(payload.manifest.updatedAt);
-    setProjectMeta(payload.project);
     setDirty(false);
   };
   const saveProject = () => {
@@ -1072,9 +1137,11 @@ export function App() {
       const loadedPayload = { ...payload, project: { ...payload.project, fileName: file.name } };
       writeWorkingCopy(loadedPayload);
       const loadedSettings = { ...defaultProjectSettings, ...(loadedPayload.project.settings || {}) };
+      const nextProjectMeta = { ...loadedPayload.project, settings: loadedSettings };
+      resetHistory(loadedPayload.people, loadedPayload.partnerships || [], nextProjectMeta);
       setPeople(payload.people);
       setPartnerships(loadedPayload.partnerships || []);
-      setProjectMeta({ ...loadedPayload.project, settings: loadedSettings });
+      setProjectMeta(nextProjectMeta);
       setTreeStyle(loadedSettings.treeStyle || "classic");
       setShowPhotos(loadedSettings.showPhotos !== false);
       setAutoSaveEnabled(loadedSettings.autoSave !== false);
@@ -1187,9 +1254,10 @@ export function App() {
          <button type="button" className="brand brand-button" onClick={() => setMainMenuOpen(true)} aria-label="Открыть главное меню"><TreeStructure size={42} weight="fill" /><span>Семейное древо</span></button>
          <div className="header-divider" />
          <button type="button" className="button button-primary add-person-button" onClick={() => openEditor()}><Plus size={20} weight="bold" /> Добавить человека</button>
-         <button type="button" className="button button-secondary file-button" onClick={openProject}><FolderOpen size={18} /> Открыть проект</button>
-         <button type="button" className="button button-primary save-project-button" onClick={saveProject}><FloppyDisk size={18} weight="bold" /> Сохранить проект</button>
-         <div className="search-wrap"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по именам..." aria-label="Поиск по именам" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}{query && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
+          <button type="button" className="button button-secondary file-button" onClick={openProject}><FolderOpen size={18} /> Открыть проект</button>
+          <button type="button" className="button button-primary save-project-button" onClick={saveProject}><FloppyDisk size={18} weight="bold" /> Сохранить проект</button>
+          <div className="history-actions" aria-label="История действий"><button type="button" className="icon-button history-button" onClick={undoAction} disabled={!historyStatus.canUndo} title="Отменить действие (Ctrl+Z)" aria-label="Отменить действие"><ArrowCounterClockwise size={20} /></button><button type="button" className="icon-button history-button" onClick={redoAction} disabled={!historyStatus.canRedo} title="Повторить действие (Ctrl+Y)" aria-label="Повторить действие"><ArrowClockwise size={20} /></button></div>
+          <div className="search-wrap"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по именам..." aria-label="Поиск по именам" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}{query && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
          <div className="header-actions">
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
