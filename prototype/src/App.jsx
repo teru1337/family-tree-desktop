@@ -56,6 +56,7 @@ import { runBackgroundExport } from "./export-worker-client.js";
 import { calculateRelationship, personLabel } from "./relationship-calculator.js";
 import { explainUserError } from "./ui-feedback.js";
 import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
+import { getSiblingComponent, orderGenerationMembers, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -71,7 +72,7 @@ import {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true };
 
 const initialPartnerships = [];
@@ -278,6 +279,13 @@ function RelationSection({ title, items, onSelect, emptyText }) {
   return <section className="relation-section"><div className="section-title-row"><h3>{title}</h3><PencilSimple size={15} /></div>{items.length ? items.map(({ person, meta, relationshipId }) => <RelationshipItem key={`${person.id}-${relationshipId || title}`} person={person} meta={meta} relationshipId={relationshipId} onSelect={onSelect} />) : <p className="empty-relation">{emptyText}</p>}</section>;
 }
 
+function SiblingOrderSection({ person, siblings, onMove }) {
+  const siblingPeople = orderSiblingMembers(siblings.map((item) => item.person));
+  if (siblingPeople.length < 2) return null;
+  const currentIndex = siblingPeople.findIndex((item) => item.id === person.id);
+  return <section className="detail-section sibling-order-section"><div className="section-title-row"><h3>Порядок братьев и сестёр</h3><UsersThree size={15} /></div><p className="sibling-order-help">По умолчанию порядок определяется датой рождения. Кнопки сохраняют ручной порядок в проекте.</p><div className="sibling-order-list">{siblingPeople.map((sibling, index) => <div className={`sibling-order-item ${sibling.id === person.id ? "selected" : ""}`} key={sibling.id}><span>{index + 1}</span><strong>{personDisplayName(sibling)}</strong>{sibling.id === person.id && <small>выбран</small>}</div>)}</div><div className="sibling-order-actions"><button type="button" className="button button-secondary" onClick={() => onMove("up")} disabled={currentIndex <= 0}><CaretUp size={17} /> Выше</button><button type="button" className="button button-secondary" onClick={() => onMove("down")} disabled={currentIndex < 0 || currentIndex >= siblingPeople.length - 1}><CaretDown size={17} /> Ниже</button></div></section>;
+}
+
 function partnershipDescription(partnership) {
   if (!partnership) return "Связь без уточнения";
   const type = partnershipTypeLabel[partnership.type] || "Связь";
@@ -285,7 +293,7 @@ function partnershipDescription(partnership) {
   return `${type}${partnership.startDate ? ` · с ${partnership.startDate}` : ""}`;
 }
 
-function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRelative, onManageRelationships, onCalculateRelationship, onShowOnMap, onDelete }) {
+function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRelative, onManageRelationships, onCalculateRelationship, onShowOnMap, onDelete, onMoveSiblingOrder }) {
   if (!person) return <div className="detail-content empty-tree-state"><h2>Дерево пока пустое</h2><p>Добавьте первого человека, даже если известны только отдельные сведения.</p><button type="button" className="button button-primary" onClick={() => onAddRelative("")}><Plus size={18} /> Добавить человека</button></div>;
   const displayName = personDisplayName(person);
   const find = (id) => people.find((item) => item.id === id);
@@ -312,10 +320,12 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
     return { person: child, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, relationshipId: parentLink?.id || makeParentLinkId(child?.id || childId, person.id, type) };
   }).filter((item) => item.person);
   const siblingLinks = person.siblingLinks?.length ? person.siblingLinks : (person.siblingIds || []).map((siblingId) => ({ id: makeSiblingLinkId(person.id, siblingId, "biological"), personId: siblingId, type: "biological" }));
-  const siblings = siblingLinks.map((link) => {
+  const siblingItems = siblingLinks.map((link) => {
     const sibling = find(link.personId);
     return { person: sibling, meta: siblingTypeLabel[link.type] || relationTypeLabel.unknown, relationshipId: link.id || makeSiblingLinkId(person.id, link.personId, link.type || "unknown") };
   }).filter((item) => item.person);
+  const siblingPeople = orderSiblingMembers(siblingItems.map((item) => item.person));
+  const siblings = siblingPeople.map((sibling) => siblingItems.find((item) => item.person.id === sibling.id)).filter(Boolean);
   const relationIds = [...parents, ...partners, ...children, ...siblings].map((item) => item.relationshipId).filter(Boolean);
   return (
     <div className="detail-content">
@@ -324,6 +334,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
       <RelationSection title="Родители" items={parents} onSelect={onSelect} emptyText="Родители ещё не добавлены" />
       <RelationSection title="Супруги и партнёры" items={partners} onSelect={onSelect} emptyText="Супруги и партнёры ещё не добавлены" />
       <RelationSection title="Братья и сёстры" items={siblings} onSelect={onSelect} emptyText="Братья и сёстры ещё не добавлены" />
+      <SiblingOrderSection person={person} siblings={siblings} onMove={(direction) => onMoveSiblingOrder?.(person.id, direction)} />
       <RelationSection title="Дети" items={children} onSelect={onSelect} emptyText="Дети ещё не добавлены" />
       <section className="detail-section relationship-identifiers"><div className="section-title-row"><h3>Идентификаторы</h3><Info size={15} /></div><dl className="facts-list"><div><dt>ID человека</dt><dd className="identifier-value">{person.id}</dd></div><div><dt>Связей в панели</dt><dd>{relationIds.length}</dd></div><div><dt>ID связей</dt><dd className="identifier-value">{relationIds.length ? relationIds.join(" · ") : "—"}</dd></div></dl></section>
       <div className="relationship-actions"><button type="button" className="button button-secondary relationship-calculator-button" onClick={() => onCalculateRelationship(person.id)}><UsersThree size={18} /> Узнать родство</button><button type="button" className="button button-secondary relationship-manage-button" onClick={onManageRelationships}><Link size={18} /> Управлять связями</button><button type="button" className="add-relative-button" onClick={() => onAddRelative("child")}><UserPlus size={20} /><span><strong>Добавить родственника</strong><small>Создать новую запись человека</small></span><CaretRight size={18} /></button><button type="button" className="button delete-person-button" onClick={onDelete}><Trash size={18} /> Удалить человека</button></div>
@@ -545,7 +556,7 @@ function buildTreeLayout(people, partnerships = [], options = {}) {
     if (!groups[generation]) groups[generation] = [];
     groups[generation].push(person);
   });
-  const generations = groups.map((members, index) => ({ index, members: members || [] })).filter((group) => group.members.length);
+  const generations = groups.map((members, index) => ({ index, members: orderGenerationMembers(members || []) })).filter((group) => group.members.length);
   const cardWidth = Math.max(190, Number(options.cardWidth) || 190);
   const cardHeight = Math.max(92, Number(options.cardHeight) || 92);
   const columnStep = Math.max(cardWidth + 70, Number(options.columnStep) || 280);
@@ -867,7 +878,7 @@ const instructionSteps = [
   { image: "01-menu.svg", source: "source-01-menu.jpg", title: "Главное меню", text: "Здесь начинается работа с приложением. Меню можно открыть в любой момент кнопкой «Меню» или нажатием на логотип «Семейное древо».", tips: ["Создать древо — начать пустой проект.", "Загрузить древо — открыть файл .familytree.", "Настройки и инструкция доступны без закрытия проекта."] },
   { image: "02-project.svg", source: "source-02-project.jpg", title: "Создать, открыть и сохранить дерево", text: "После входа можно создать новое дерево, открыть ранее сохранённый файл или скачать текущий проект на компьютер.", tips: ["Файл проекта имеет расширение .familytree.", "Сохраняйте копию на внешний диск или флешку.", "Автосохранение работает отдельно от скачивания файла."] },
   { image: "03-person.svg", source: "source-03-person.jpg", title: "Добавить человека и сразу связать его", text: "При добавлении записи сначала выберите связь с уже известным человеком. Затем заполните только те поля, которые действительно известны.", tips: ["Можно добавить родителя, ребёнка или супруга/партнёра.", "Доступны биологическая связь, усыновление и степ-родство.", "Дата, место, профессия, фото и биография необязательны."] },
-  { image: "04-tree.svg", source: "source-04-tree.jpg", title: "Смотреть дерево и перемещаться по полотну", text: "Дерево можно рассматривать как большое полотно: двигайте пустое место зажатой ЛКМ, меняйте масштаб и перетаскивайте карточки внутри своего поколения.", tips: ["Стрелки слева перемещают полотно небольшими шагами.", "Карточка не может наехать на соседнюю.", "Если потянуть её в другое поколение, она вернётся на свою строку."] },
+  { image: "04-tree.svg", source: "source-04-tree.jpg", title: "Смотреть дерево и перемещаться по полотну", text: "Дерево можно рассматривать как большое полотно: двигайте пустое место зажатой ЛКМ, меняйте масштаб и перетаскивайте карточки внутри своего поколения.", tips: ["Стрелки слева перемещают полотно небольшими шагами.", "Карточка не может наехать на соседнюю.", "Если потянуть её в другое поколение, она вернётся на свою строку.", "Порядок братьев и сестёр меняется в правой панели кнопками «Выше» и «Ниже»."] },
   { image: "05-search.svg", source: "source-05-search.jpg", title: "Найти человека и показать его на карте", text: "Введите часть имени в строку поиска. После выбора записи правая панель покажет сведения, семейный статус, роли и ID связей.", tips: ["Нажмите «Показать найденного человека на карте», чтобы центрировать дерево.", "Нажатие на родственника в правой панели открывает его карточку.", "Панель можно закрыть крестиком и открыть снова кнопкой на полотне."] },
   { image: "06-relationships.svg", source: "source-06-relationships.jpg", title: "Управлять связями и удалять ошибочные записи", text: "Кнопка «Управлять связями» добавляет родство, брак, партнёрство или развод между уже существующими людьми.", tips: ["Степ-родство используется для отчима, мачехи, пасынка и падчерицы.", "Каждая связь получает отдельный ID.", "Удаление человека требует подтверждения и создаёт защитную копию."] },
   { image: "07-backups.svg", source: "source-07-backups.jpg", title: "Копии, архив и восстановление", text: "Приложение автоматически сохраняет локальные копии. Через меню «•••» можно открыть список копий или создать полный архив материалов для переноса.", tips: ["Копии хранятся на этом компьютере.", "Архив .familyarchive включает людей, фотографии, биографии, связи и источники.", "Перед восстановлением архива приложение проверяет его содержимое."] },
@@ -1426,6 +1437,15 @@ export function App() {
   };
   const selectPerson = (id) => { setSelectedId(id); setQuery(""); setFiltersOpen(false); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
   const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person) return; setSelectedId(id); setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${personDisplayName(person)}`); };
+  const moveSiblingOrder = (personId, direction) => {
+    const nextPeople = reorderSiblingComponent(people, personId, direction);
+    if (nextPeople === people) return;
+    setPeople(nextPeople);
+    setDirty(true);
+    const movedPerson = nextPeople.find((person) => person.id === personId);
+    const position = getSiblingComponent(nextPeople, personId).findIndex((person) => person.id === personId) + 1;
+    setToast(`Порядок изменён: ${personDisplayName(movedPerson)} — место ${position}`);
+  };
   const openEditor = (person = null, relation = "") => {
     const contexts = new Set(Array.isArray(person?.familyContext) ? person.familyContext : []);
     setEditorSessionKey((current) => current + 1);
@@ -1969,7 +1989,7 @@ export function App() {
          <aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}>
            <div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} />
            <div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>
-           {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}
+           {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} onMoveSiblingOrder={moveSiblingOrder} />}
          </aside>
        </main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>

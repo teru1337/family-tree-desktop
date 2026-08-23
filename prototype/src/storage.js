@@ -33,11 +33,14 @@ function uniqueIds(value) {
 }
 
 function normalizePersonMetadata(person) {
+  const rawSiblingOrder = person?.siblingOrder;
+  const siblingOrderNumber = rawSiblingOrder === "" || rawSiblingOrder === null || rawSiblingOrder === undefined ? null : Number(rawSiblingOrder);
   return {
     ...person,
     isUnknown: person?.isUnknown === true,
     source: typeof person?.source === "string" ? person.source.trim() : "",
     confidence: PERSON_CONFIDENCE_LEVELS.includes(person?.confidence) ? person.confidence : "unknown",
+    siblingOrder: Number.isInteger(siblingOrderNumber) && siblingOrderNumber > 0 && siblingOrderNumber <= 999 ? siblingOrderNumber : null,
   };
 }
 
@@ -394,6 +397,10 @@ export function validateProject(raw) {
 
   raw.people.forEach((person) => {
     const personId = String(person?.id || "человека");
+    if (person?.siblingOrder !== undefined && person?.siblingOrder !== null && person?.siblingOrder !== "") {
+      const siblingOrder = Number(person.siblingOrder);
+      if (!Number.isInteger(siblingOrder) || siblingOrder < 1 || siblingOrder > 999) warnings.push(`Порядок записи ${personId} среди братьев и сестёр указан неправильно и будет сброшен.`);
+    }
     [...uniqueIds(person?.parentIds), ...uniqueIds(person?.partnerIds), ...uniqueIds(person?.childIds), ...uniqueIds(person?.siblingIds)].forEach((referenceId) => {
       if (!peopleIds.has(referenceId)) warnings.push(`У записи ${personId} есть ссылка на отсутствующего человека: ${referenceId}.`);
     });
