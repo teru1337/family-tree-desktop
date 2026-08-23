@@ -58,6 +58,8 @@ import { calculateRelationship, personLabel } from "./relationship-calculator.js
 import { explainUserError } from "./ui-feedback.js";
 import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
 import { getSiblingComponent, orderGenerationMembers, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
+import { getNearbyFamilyIds } from "./family-view.js";
+import { canMovePersonNavigation, createPersonNavigation, currentPersonId, movePersonNavigation, visitPerson } from "./person-navigation.js";
 import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_FIELD_LABEL, MAX_CUSTOM_FIELD_VALUE, formatCardFieldLines, normalizeCustomFields, sanitizeCardFields, validateCustomFields } from "./person-fields.js";
 import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_PLACE, MAX_EVENT_SOURCE, MAX_EVENT_TITLE, MAX_TIMELINE_EVENTS, TIMELINE_EVENT_TYPES, normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents, sortTimelineEvents, timelineEventLabel, validateFactSources, validateTimelineEvents } from "./timeline.js";
 import {
@@ -331,7 +333,7 @@ function TimelineSection({ person }) {
   return <section className="detail-section timeline-section"><div className="section-title-row"><h3>Временная шкала</h3><ClockCounterClockwise size={15} /></div>{events.length ? <ol className="timeline-list">{events.map((event) => <li className="timeline-item" key={event.id}><div className="timeline-marker" /><div className="timeline-event-copy"><div className="timeline-event-heading"><strong>{event.title}</strong><span>{event.date || "Дата не указана"}</span></div><small>{timelineEventLabel(event)}{event.date && event.datePrecision !== "unknown" ? ` · ${timelinePrecisionLabel[event.datePrecision] || ""}` : ""}{event.place ? ` · ${event.place}` : ""}</small>{event.description && <p>{event.description}</p>}{event.source && <em>Источник: {event.source}</em>}</div></li>)}</ol> : <p className="empty-relation">События ещё не добавлены</p>}</section>;
 }
 
-function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRelative, onManageRelationships, onCalculateRelationship, onShowOnMap, onDelete, onMoveSiblingOrder }) {
+function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRelative, onManageRelationships, onCalculateRelationship, onShowOnMap, onDelete, onMoveSiblingOrder, onPreviousPerson, onNextPerson, canGoPrevious, canGoNext }) {
   if (!person) return <div className="detail-content empty-tree-state"><h2>Дерево пока пустое</h2><p>Добавьте первого человека, даже если известны только отдельные сведения.</p><button type="button" className="button button-primary" onClick={() => onAddRelative("")}><Plus size={18} /> Добавить человека</button></div>;
   const displayName = personDisplayName(person);
   const find = (id) => people.find((item) => item.id === id);
@@ -367,7 +369,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   const relationIds = [...parents, ...partners, ...children, ...siblings].map((item) => item.relationshipId).filter(Boolean);
   return (
     <div className="detail-content">
-      <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div></div><div className="profile-actions"><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
+      <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div></div><div className="profile-actions"><div className="person-navigation-actions"><button type="button" className="button button-secondary person-nav-button" onClick={onPreviousPerson} disabled={!canGoPrevious}><CaretLeft size={17} /> Предыдущий</button><button type="button" className="button button-secondary person-nav-button" onClick={onNextPerson} disabled={!canGoNext}>Следующий <CaretRight size={17} /></button></div><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
       <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><PencilSimple size={16} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Девичья фамилия</dt><dd>{person.maidenName || "—"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
       <FactSourcesSection person={person} />
       <TimelineSection person={person} />
@@ -687,12 +689,13 @@ function buildTreeLayout(people, partnerships = [], options = {}) {
   return { generations, positions, width, height, top, cardWidth, cardHeight, columnStep, rowStep };
 }
 
-function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, renderIndex = null }) {
+function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, renderIndex = null, strictVisible = false }) {
   const byId = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships, byId), [people, partnerships, byId]);
   const index = renderIndex || fallbackIndex;
-  const parentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds).filter((edge) => positions[edge.parent.id] && positions[edge.child.id]), [index, positions, visibleIds]);
-  const partnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds).filter((edge) => positions[edge.first.id] && positions[edge.second.id]), [index, positions, visibleIds]);
+  const edgeVisible = (edge, firstId, secondId) => !strictVisible || !visibleIds || (visibleIds.has(firstId) && visibleIds.has(secondId));
+  const parentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds).filter((edge) => positions[edge.parent.id] && positions[edge.child.id] && edgeVisible(edge, edge.parent.id, edge.child.id)), [index, positions, visibleIds, strictVisible]);
+  const partnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds).filter((edge) => positions[edge.first.id] && positions[edge.second.id] && edgeVisible(edge, edge.first.id, edge.second.id)), [index, positions, visibleIds, strictVisible]);
   return <svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const from = positions[parent.id]; const to = positions[child.id]; const startX = from.left + from.width / 2; const startY = from.top + from.height; const endX = to.left + to.width / 2; const endY = to.top; const middleY = startY + Math.max(24, (endY - startY) / 2); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""}`} d={`M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const a = positions[first.id]; const b = positions[second.id]; const start = a.left < b.left ? a : b; const end = a.left < b.left ? b : a; const startX = start.left + start.width; const startY = start.top + start.height / 2; const endX = end.left; const endY = end.top + end.height / 2; const middleX = startX + Math.max(18, (endX - startX) / 2); const label = partnership.status === "divorced" ? "Развод" : partnershipTypeLabel[partnership.type] || "Связь"; return <g key={partnership.id}><path className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""}`} d={`M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}`} /><text className="partnership-label" x={middleX} y={Math.min(startY, endY) - 8} textAnchor="middle">{label}</text></g>; })}</g></svg>;
 }
 
@@ -718,7 +721,7 @@ function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewp
   return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{people.map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
 }
 
-function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected }) {
+function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected, viewMode = "full", nearbyIds = new Set(), onViewModeChange }) {
   const dragRef = useRef(null);
   const personDragRef = useRef(null);
   const viewportRef = useRef(null);
@@ -746,14 +749,17 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     return () => observer.disconnect();
   }, []);
   const visibleIds = useMemo(() => {
-    if (!viewportSize.width || !viewportSize.height) return null;
+    const modeIds = viewMode === "nearby" ? nearbyIds : null;
+    if (!viewportSize.width || !viewportSize.height) return modeIds;
     const margin = Math.max(240, 520 / zoom);
     const left = (-pan.x / zoom) - margin;
     const top = (-pan.y / zoom) - margin;
     const right = ((viewportSize.width - pan.x) / zoom) + margin;
     const bottom = ((viewportSize.height - pan.y) / zoom) + margin;
-    return new Set(Object.entries(renderedPositions).filter(([, position]) => position.left + position.width >= left && position.left <= right && position.top + position.height >= top && position.top <= bottom).map(([id]) => id));
-  }, [renderedPositions, pan.x, pan.y, zoom, viewportSize]);
+    const viewportIds = new Set(Object.entries(renderedPositions).filter(([, position]) => position.left + position.width >= left && position.left <= right && position.top + position.height >= top && position.top <= bottom).map(([id]) => id));
+    if (!modeIds) return viewportIds;
+    return new Set([...modeIds].filter((id) => viewportIds.has(id)));
+  }, [renderedPositions, pan.x, pan.y, zoom, viewportSize, viewMode, nearbyIds]);
   const visiblePeople = useMemo(() => visibleIds ? people.filter((person) => visibleIds.has(person.id)) : people, [people, visibleIds]);
   useEffect(() => {
     const knownIds = new Set(Object.keys(layout.positions));
@@ -882,10 +888,11 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const styleLabel = treeStyle === "album" ? "Семейный альбом" : treeStyle === "minimal" ? "Сдержанный" : "Классический";
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
+      <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "nearby" ? "selected" : ""} onClick={() => onViewModeChange?.("nearby")} disabled={!selectedId}>Ближайшая семья</button></div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} strictVisible={viewMode === "nearby"} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
-      <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
+      <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{viewMode === "nearby" ? "Ближайшая семья" : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
   );
 }
@@ -1293,12 +1300,16 @@ export function App() {
   const [people, setPeople] = useState(sessionPeople);
   const [partnerships, setPartnerships] = useState(sessionPartnerships);
   const [projectMeta, setProjectMeta] = useState({ ...sessionProject, settings: sessionSettings });
-  const [selectedId, setSelectedId] = useState(sessionPeople.find((person) => person.id === "ivan")?.id || sessionPeople[0]?.id || "");
+  const initialSelectedId = sessionPeople.find((person) => person.id === "ivan")?.id || sessionPeople[0]?.id || "";
+  const [selectedId, setSelectedId] = useState(initialSelectedId);
+  const [personNavigation, setPersonNavigation] = useState(() => createPersonNavigation(initialSelectedId));
+  const personNavigationRef = useRef(createPersonNavigation(initialSelectedId));
   const [query, setQuery] = useState("");
   const [searchFilters, setSearchFilters] = useState({ ...DEFAULT_SEARCH_FILTERS });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [treeViewMode, setTreeViewMode] = useState("full");
   const [focusRequest, setFocusRequest] = useState(null);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -1366,6 +1377,46 @@ export function App() {
   const deferredQuery = useDeferredValue(query);
   const hasActiveSearch = Boolean(query.trim() || Object.entries(searchFilters).some(([field, value]) => value && value !== DEFAULT_SEARCH_FILTERS[field]));
   const searchResults = useMemo(() => filterPeople(people, partnerships, treeLayout.positions, deferredQuery, searchFilters), [people, partnerships, deferredQuery, searchFilters, treeLayout.positions]);
+  const nearbyFamilyIds = useMemo(() => getNearbyFamilyIds(people, partnerships, selectedId), [people, partnerships, selectedId]);
+  const resetPersonNavigation = (id) => {
+    const next = createPersonNavigation(id);
+    personNavigationRef.current = next;
+    setPersonNavigation(next);
+  };
+  const setSelectedPerson = (id, { record = true } = {}) => {
+    const person = people.find((item) => item.id === id);
+    if (!person) return false;
+    if (record) {
+      const next = visitPerson(personNavigationRef.current, id);
+      personNavigationRef.current = next;
+      setPersonNavigation(next);
+    }
+    setSelectedId(id);
+    return true;
+  };
+  const navigatePersonHistory = (direction) => {
+    const next = movePersonNavigation(personNavigationRef.current, direction);
+    const id = currentPersonId(next);
+    if (!id || !people.some((person) => person.id === id)) return;
+    personNavigationRef.current = next;
+    setPersonNavigation(next);
+    setSelectedPerson(id, { record: false });
+    setQuery("");
+    setFiltersOpen(false);
+    setEditing(false);
+    setRelationshipEditing(false);
+    setInspectorOpen(true);
+    setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 }));
+  };
+  const changeTreeViewMode = (mode) => {
+    if (mode === "nearby" && !selectedId) {
+      setToast("Сначала выберите человека");
+      return;
+    }
+    setTreeViewMode(mode);
+    if (mode === "nearby" && selectedId) setFocusRequest((current) => ({ id: selectedId, token: (current?.token || 0) + 1 }));
+    setToast(mode === "nearby" ? "Показана ближайшая семья" : "Показано всё дерево");
+  };
   const applyHistorySnapshot = (snapshot) => {
     setPeople(snapshot.people);
     setPartnerships(snapshot.partnerships);
@@ -1586,8 +1637,8 @@ export function App() {
     }
     window.open("https://github.com/teru1337/family-tree-desktop/releases", "_blank", "noopener,noreferrer");
   };
-  const selectPerson = (id) => { setSelectedId(id); setQuery(""); setFiltersOpen(false); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
-  const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person) return; setSelectedId(id); setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${personDisplayName(person)}`); };
+  const selectPerson = (id) => { if (!setSelectedPerson(id)) return; setQuery(""); setFiltersOpen(false); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
+  const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person || !setSelectedPerson(id)) return; setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${personDisplayName(person)}`); };
   const moveSiblingOrder = (personId, direction) => {
     const nextPeople = reorderSiblingComponent(people, personId, direction);
     if (nextPeople === people) return;
@@ -1653,6 +1704,7 @@ export function App() {
     setPeople(nextPeople);
     setPartnerships(nextPartnerships);
     setSelectedId(fallbackId);
+    resetPersonNavigation(fallbackId);
     setEditing(false);
     setRelationshipEditing(false);
     setDraft(null);
@@ -1737,7 +1789,7 @@ export function App() {
     const normalizedName = isUnknownRecord ? "" : draft.name.trim() || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
     const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
-    if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedId(personToSave.id); setToast("Изменения сохранены"); } else {
+    if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedPerson(personToSave.id); setToast("Изменения сохранены"); } else {
       const newId = makeId(); const newPerson = { ...personToSave, id: newId };
       const relationTarget = people.find((person) => person.id === connectionTargetId);
       const selectedRelationType = relationshipType || "biological";
@@ -1768,6 +1820,9 @@ export function App() {
         return [...next, newPerson];
       });
       if (relationTarget && relationshipMode === "partner") setPartnerships((current) => [...current, { id: `partnership-${relationTarget.id}-${newId}`, personIds: [relationTarget.id, newId], type: partnershipType, status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown", source: normalizeSourceValue(relationshipSource) }]);
+      const nextNavigation = visitPerson(personNavigationRef.current, newId);
+      personNavigationRef.current = nextNavigation;
+      setPersonNavigation(nextNavigation);
       setSelectedId(newId);
       if (addAnother) {
         setEditorSessionKey((current) => current + 1);
@@ -1947,7 +2002,9 @@ export function App() {
       setShowPhotos(restoredSettings.showPhotos !== false);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
-      setSelectedId(restoredPayload.people.find((person) => person.id === "ivan")?.id || restoredPayload.people[0]?.id || "");
+      const restoredSelectedId = restoredPayload.people.find((person) => person.id === "ivan")?.id || restoredPayload.people[0]?.id || "";
+      setSelectedId(restoredSelectedId);
+      resetPersonNavigation(restoredSelectedId);
       resetHistory(restoredPayload.people, restoredPayload.partnerships || [], nextProjectMeta);
       setEditing(false);
       setDraft(null);
@@ -1994,7 +2051,9 @@ export function App() {
       setShowPhotos(loadedSettings.showPhotos !== false);
       setCardFields(sanitizeCardFields(loadedSettings.cardFields));
       setAutoSaveEnabled(loadedSettings.autoSave !== false);
-      setSelectedId(loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "");
+      const loadedSelectedId = loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "";
+      setSelectedId(loadedSelectedId);
+      resetPersonNavigation(loadedSelectedId);
       setEditing(false);
       setDraft(null);
       setLastSavedAt(loadedPayload.manifest.updatedAt);
@@ -2020,7 +2079,9 @@ export function App() {
       setShowPhotos(restoredSettings.showPhotos !== false);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
-      setSelectedId(payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "");
+      const backupSelectedId = payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "";
+      setSelectedId(backupSelectedId);
+      resetPersonNavigation(backupSelectedId);
       setEditing(false);
       setDraft(null);
       setLastSavedAt(payload.manifest.updatedAt);
@@ -2042,7 +2103,7 @@ export function App() {
     }
     setMoreOpen(false);
     setRelationshipCalculatorOpen(true);
-    if (sourceId && people.some((person) => person.id === sourceId)) setSelectedId(sourceId);
+    if (sourceId && people.some((person) => person.id === sourceId)) setSelectedPerson(sourceId);
   };
   const closeSettings = () => {
     setSettingsOpen(false);
@@ -2103,6 +2164,8 @@ export function App() {
     setPartnerships([]);
     setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, cardFields: [...cardFields] } });
     setSelectedId("");
+    resetPersonNavigation("");
+    setTreeViewMode("full");
     setPan({ x: 0, y: 0 });
     setZoom(1);
     setEditing(false);
@@ -2154,11 +2217,11 @@ export function App() {
          </div>
        </header>
        <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}>
-         <TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека")} />
+         <TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека")} viewMode={treeViewMode} nearbyIds={nearbyFamilyIds} onViewModeChange={changeTreeViewMode} />
          <aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}>
            <div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} />
            <div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>
-           {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} relationshipSource={relationshipSource} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onRelationshipSourceChange={setRelationshipSource} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setRelationshipSource(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} onMoveSiblingOrder={moveSiblingOrder} />}
+           {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} relationshipSource={relationshipSource} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onRelationshipSourceChange={setRelationshipSource} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setRelationshipSource(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} onMoveSiblingOrder={moveSiblingOrder} onPreviousPerson={() => navigatePersonHistory(-1)} onNextPerson={() => navigatePersonHistory(1)} canGoPrevious={canMovePersonNavigation(personNavigation, -1)} canGoNext={canMovePersonNavigation(personNavigation, 1)} />}
          </aside>
        </main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
