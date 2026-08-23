@@ -789,7 +789,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
 
 export function App() {
   const [loadedSession] = useState(() => readWorkingCopy());
-  const sessionPeople = loadedSession?.people?.length ? loadedSession.people : initialPeople;
+  const sessionPeople = loadedSession ? loadedSession.people : initialPeople;
   const sessionPartnerships = loadedSession ? (loadedSession.partnerships || []) : initialPartnerships;
   const sessionProject = loadedSession?.project || { id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree" };
   const sessionSettings = { ...defaultProjectSettings, ...(sessionProject.settings || {}) };
@@ -843,20 +843,32 @@ export function App() {
   const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos }) => {
     const nextTitle = String(title || "").trim() || "Моё семейное древо";
     const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos } };
-    setProjectMeta(nextMeta);
-    setAutoSaveEnabled(autoSave);
-    setTreeStyle(nextTreeStyle);
-    setShowPhotos(nextShowPhotos);
     const payload = createProjectPayload(people, nextMeta, partnerships);
-    writeWorkingCopy(payload);
-    setLastSavedAt(payload.manifest.updatedAt);
-    setDirty(false);
-    closeSettings();
-    setToast("Настройки сохранены");
+    try {
+      writeWorkingCopy(payload);
+      setProjectMeta(nextMeta);
+      setAutoSaveEnabled(autoSave);
+      setTreeStyle(nextTreeStyle);
+      setShowPhotos(nextShowPhotos);
+      setLastSavedAt(payload.manifest.updatedAt);
+      setDirty(false);
+      closeSettings();
+      setToast("Настройки сохранены");
+    } catch (error) {
+      setToast(error.message || "Не удалось сохранить настройки");
+    }
   };
 
   useEffect(() => { if (!toast) return undefined; const timeout = window.setTimeout(() => setToast(""), 2600); return () => window.clearTimeout(timeout); }, [toast]);
-  useEffect(() => { if (!loadedSession) return undefined; const timeout = window.setTimeout(() => setToast("Локальная рабочая копия восстановлена"), 250); return () => window.clearTimeout(timeout); }, [loadedSession]);
+  useEffect(() => {
+    if (!loadedSession) return undefined;
+    const timeout = window.setTimeout(() => {
+      if (loadedSession.recoveredFrom) setToast("Рабочая копия восстановлена после сбоя сохранения");
+      else if (loadedSession.validationWarnings?.length) setToast(`Рабочая копия восстановлена; найдено замечаний: ${loadedSession.validationWarnings.length}`);
+      else setToast("Локальная рабочая копия восстановлена");
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [loadedSession]);
   useEffect(() => {
     const desktop = window.familyTreeDesktop;
     if (!desktop?.onUpdateStatus) return undefined;
@@ -871,11 +883,15 @@ export function App() {
   useEffect(() => {
     if (!dirty || !autoSaveEnabled) return undefined;
     const timeout = window.setTimeout(() => {
-      const payload = createProjectPayload(people, projectMeta, partnerships);
-      writeWorkingCopy(payload);
-      const backup = addBackup(payload, "auto");
-      setLastBackupAt(backup?.createdAt || null);
-      setBackups(readBackups());
+      try {
+        const payload = createProjectPayload(people, projectMeta, partnerships);
+        writeWorkingCopy(payload);
+        const backup = addBackup(payload, "auto");
+        setLastBackupAt(backup?.createdAt || null);
+        setBackups(readBackups());
+      } catch (error) {
+        setToast(error.message || "Не удалось выполнить автосохранение");
+      }
     }, 800);
     return () => window.clearTimeout(timeout);
   }, [dirty, autoSaveEnabled, people, projectMeta, partnerships]);
@@ -1025,10 +1041,14 @@ export function App() {
     setDirty(false);
   };
   const saveProject = () => {
-    const payload = buildPayload();
-    downloadProjectFile(payload, projectMeta.fileName || "семейное-древо.familytree");
-    commitLocalSave(payload);
-    setToast(`Проект сохранён: ${projectMeta.fileName || "семейное-древо.familytree"}`);
+    try {
+      const payload = buildPayload();
+      downloadProjectFile(payload, projectMeta.fileName || "семейное-древо.familytree");
+      commitLocalSave(payload);
+      setToast(`Проект сохранён: ${projectMeta.fileName || "семейное-древо.familytree"}`);
+    } catch (error) {
+      setToast(error.message || "Не удалось сохранить проект");
+    }
   };
   const saveCopy = () => {
     const payload = buildPayload();
@@ -1049,21 +1069,22 @@ export function App() {
         setLastBackupAt(backup?.createdAt || null);
       }
       const payload = normalizeProject(JSON.parse(await file.text()));
-      const loadedSettings = { ...defaultProjectSettings, ...(payload.project.settings || {}) };
+      const loadedPayload = { ...payload, project: { ...payload.project, fileName: file.name } };
+      writeWorkingCopy(loadedPayload);
+      const loadedSettings = { ...defaultProjectSettings, ...(loadedPayload.project.settings || {}) };
       setPeople(payload.people);
-      setPartnerships(payload.partnerships || []);
-      setProjectMeta({ ...payload.project, fileName: file.name, settings: loadedSettings });
+      setPartnerships(loadedPayload.partnerships || []);
+      setProjectMeta({ ...loadedPayload.project, settings: loadedSettings });
       setTreeStyle(loadedSettings.treeStyle || "classic");
       setShowPhotos(loadedSettings.showPhotos !== false);
       setAutoSaveEnabled(loadedSettings.autoSave !== false);
-      setSelectedId(payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "");
+      setSelectedId(loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "");
       setEditing(false);
       setDraft(null);
-      writeWorkingCopy({ ...payload, project: { ...payload.project, fileName: file.name } });
-      setLastSavedAt(payload.manifest.updatedAt);
+      setLastSavedAt(loadedPayload.manifest.updatedAt);
       setDirty(false);
       setMainMenuOpen(false);
-      setToast(`Открыт проект: ${file.name}`);
+      setToast(loadedPayload.validationWarnings?.length ? `Проект открыт; найдено замечаний: ${loadedPayload.validationWarnings.length}` : `Открыт проект: ${file.name}`);
     } catch (error) {
       setToast(error.message || "Не удалось открыть файл проекта");
     } finally {
@@ -1071,25 +1092,29 @@ export function App() {
     }
   };
   const restoreBackup = (backup) => {
-    const currentBackup = addBackup(buildPayload(), "before-restore");
-    const payload = normalizeProject(backup.payload);
-    const restoredSettings = { ...defaultProjectSettings, ...(payload.project.settings || {}) };
-    setPeople(payload.people);
-    setPartnerships(payload.partnerships || []);
-    setProjectMeta({ ...payload.project, settings: restoredSettings });
-    setTreeStyle(restoredSettings.treeStyle || "classic");
-    setShowPhotos(restoredSettings.showPhotos !== false);
-    setAutoSaveEnabled(restoredSettings.autoSave !== false);
-    setSelectedId(payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "");
-    setEditing(false);
-    setDraft(null);
-    writeWorkingCopy(payload);
-    setLastSavedAt(payload.manifest.updatedAt);
-    setLastBackupAt(currentBackup?.createdAt || backup.createdAt);
-    setBackups(readBackups());
-    setDirty(false);
-    setBackupOpen(false);
-    setToast("Резервная копия восстановлена");
+    try {
+      const currentBackup = addBackup(buildPayload(), "before-restore");
+      const payload = normalizeProject(backup.payload);
+      writeWorkingCopy(payload);
+      const restoredSettings = { ...defaultProjectSettings, ...(payload.project.settings || {}) };
+      setPeople(payload.people);
+      setPartnerships(payload.partnerships || []);
+      setProjectMeta({ ...payload.project, settings: restoredSettings });
+      setTreeStyle(restoredSettings.treeStyle || "classic");
+      setShowPhotos(restoredSettings.showPhotos !== false);
+      setAutoSaveEnabled(restoredSettings.autoSave !== false);
+      setSelectedId(payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "");
+      setEditing(false);
+      setDraft(null);
+      setLastSavedAt(payload.manifest.updatedAt);
+      setLastBackupAt(currentBackup?.createdAt || backup.createdAt);
+      setBackups(readBackups());
+      setDirty(false);
+      setBackupOpen(false);
+      setToast(payload.validationWarnings?.length ? `Резервная копия восстановлена; найдено замечаний: ${payload.validationWarnings.length}` : "Резервная копия восстановлена");
+    } catch (error) {
+      setToast(error.message || "Не удалось восстановить резервную копию");
+    }
   };
   const downloadBackup = (backup) => downloadProjectFile(backup.payload, `резервная-копия-${backup.createdAt.slice(0, 10)}.familytree`);
   const openExport = (format = "pdf") => { setExportPreset(format); setExportModalOpen(true); setMoreOpen(false); };
