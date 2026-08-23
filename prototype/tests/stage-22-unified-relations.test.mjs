@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { createProjectPayload, normalizeProject, serializeProject } from "../src/storage.js";
+import { createProjectPayload, normalizeProject, PROJECT_VERSION, serializeProject } from "../src/storage.js";
 
 const legacyPeople = [
   { id: "parent", name: "Родитель", parentIds: [], parentLinks: [], partnerIds: ["child"], childIds: ["child"] },
@@ -11,7 +11,7 @@ const payload = createProjectPayload(legacyPeople, { id: "unified" }, [
 ]);
 const persisted = JSON.parse(serializeProject(payload));
 
-assert.equal(payload.manifest.version, 3);
+assert.equal(payload.manifest.version, PROJECT_VERSION);
 assert.ok(Array.isArray(persisted.relations));
 assert.equal(Object.hasOwn(persisted, "partnerships"), false);
 assert.ok(persisted.relations.some((relation) => relation.kind === "parent" && relation.parentId === "parent" && relation.childId === "child"));
@@ -29,7 +29,7 @@ const oldV2 = {
   partnerships: [],
 };
 const migrated = normalizeProject(oldV2);
-assert.equal(migrated.manifest.version, 3);
+assert.equal(migrated.manifest.version, PROJECT_VERSION);
 assert.equal(migrated.manifest.migratedFrom, 2);
 assert.ok(migrated.relations.length >= 2);
 

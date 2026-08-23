@@ -1,6 +1,8 @@
+import { normalizePersonDate, validateDateRecord } from "./dates.js";
+
 export const PROJECT_FORMAT = "familytree";
-export const PROJECT_VERSION = 3;
-export const SUPPORTED_PROJECT_VERSIONS = [1, 2, PROJECT_VERSION];
+export const PROJECT_VERSION = 4;
+export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, PROJECT_VERSION];
 
 // Названия ключей сохраняем прежними, чтобы не потерять рабочие копии после обновления.
 export const WORKING_COPY_KEY = "familytree-working-copy-v1";
@@ -99,8 +101,10 @@ function stripPersonRelations(person) {
 }
 
 function stripPersonForStorage(person) {
-  const { image, ...profile } = stripPersonRelations(person);
-  return profile;
+  const { image, year, datePrecision, birthDateFrom, birthDateTo, ...profile } = stripPersonRelations(person);
+  const normalized = normalizePersonDate({ ...profile, year, datePrecision, birthDateFrom, birthDateTo });
+  const { year: compatibilityYear, datePrecision: compatibilityPrecision, birthDateFrom: compatibilityFrom, birthDateTo: compatibilityTo, ...storedProfile } = normalized;
+  return { ...storedProfile, birthDate: normalized.birthDate };
 }
 
 function isEmbeddedImage(value) {
@@ -287,7 +291,7 @@ function relationToPartnership(relation) {
 function migrateProject(raw) {
   if (!raw || typeof raw !== "object") return { payload: raw, migratedFrom: null };
   const version = Number(raw.manifest?.version);
-  if (version === 1 || version === 2) {
+  if (version === 1 || version === 2 || version === 3) {
     const migratedRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
     return {
       payload: {
@@ -347,6 +351,10 @@ export function validateProject(raw) {
       if (!link?.personId) warnings.push(`У записи ${personId} есть связь без идентификатора человека.`);
       else if (!peopleIds.has(String(link.personId))) warnings.push(`У записи ${personId} есть связь с отсутствующим человеком: ${link.personId}.`);
     });
+    const dateReport = validateDateRecord(person?.birthDate, person?.year, person?.datePrecision);
+    if (!dateReport.valid && (person?.birthDate !== undefined || person?.year || person?.datePrecision)) {
+      warnings.push(`Дата рождения записи ${personId} заполнена неправильно: ${dateReport.error}`);
+    }
   });
 
   // В старых файлах фотография могла находиться прямо в записи человека.
@@ -406,7 +414,7 @@ export function validateProject(raw) {
 export function createProjectPayload(people, project = {}, relationships = project.relationships || project.relations || project.partnerships || []) {
   const now = new Date().toISOString();
   const normalizedPeopleInput = ensureArray(people);
-  const normalizedPeople = normalizedPeopleInput.map((person) => ({
+  const normalizedPeople = normalizedPeopleInput.map((person) => normalizePersonDate({
     ...person,
     id: String(person?.id || `person-${Math.random().toString(16).slice(2)}`),
     gender: person?.gender === "male" || person?.gender === "female" ? person.gender : "",
@@ -452,13 +460,13 @@ export function normalizeProject(raw) {
     const id = String(person?.id || `imported-${index + 1}`);
     if (seenIds.has(id)) throw new Error("В файле обнаружены повторяющиеся идентификаторы людей.");
     seenIds.add(id);
-    return {
+    return normalizePersonDate({
       ...person,
       id,
       name: typeof person?.name === "string" ? person.name : "",
       shortName: typeof person?.shortName === "string" ? person.shortName : (typeof person?.name === "string" ? person.name : ""),
       gender: person?.gender === "male" || person?.gender === "female" ? person.gender : "",
-    };
+    });
   });
 
   const peopleIds = new Set(people.map((person) => person.id));

@@ -44,6 +44,7 @@ import {
   serializeProject,
   writeWorkingCopy,
 } from "./storage.js";
+import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate, validateDateRecord } from "./dates.js";
 import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
 import {
   EXPORT_QUALITY,
@@ -58,7 +59,7 @@ import {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", year: "", place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" };
+const blankPerson = { id: "", name: "", shortName: "", year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true };
 
 const initialPartnerships = [];
@@ -72,27 +73,15 @@ function makeId() {
   return `person-${Date.now()}`;
 }
 
-function validateDateValue(value, precision = "exact") {
-  const input = String(value || "").trim();
-  if (!input) return "";
-  const currentYear = new Date().getFullYear();
-  const normalized = input.replace(/^(около|примерно|до|после)\s+/i, "").replace(/-е(?:\s+годы)?$/i, "");
-  const yearOnly = /^(\d{4})$/.exec(normalized);
-  if (yearOnly) {
-    const year = Number(yearOnly[1]);
-    if (year < 1000 || year > currentYear + 1) return `Год должен быть в диапазоне от 1000 до ${currentYear + 1}.`;
-    if (precision === "exact") return "Для точной даты укажите день и месяц, например 12.05.1926.";
-    return "";
-  }
-  const dateParts = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/.exec(normalized);
-  if (!dateParts) return "Введите год 1926 или дату 12.05.1926 цифрами.";
-  const day = Number(dateParts[1]);
-  const month = Number(dateParts[2]);
-  const year = Number(dateParts[3]);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (year < 1000 || year > currentYear + 1 || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "Проверьте день, месяц и год в дате.";
-  if (precision === "year") return "Для точности «Только год» укажите только четыре цифры, например 1926.";
-  return "";
+function getDraftDateRecord(draft) {
+  const precision = draft?.datePrecision || inferDatePrecision(draft?.year);
+  return {
+    precision,
+    text: precision === "range" ? "" : String(draft?.year || "").trim(),
+    value: precision === "range" ? "" : String(draft?.year || "").trim(),
+    from: String(draft?.birthDateFrom || "").trim(),
+    to: String(draft?.birthDateTo || "").trim(),
+  };
 }
 
 function validatePersonDraft(draft, { isNew = false, relationshipMode = "", connectionTargetId = "" } = {}) {
@@ -107,8 +96,8 @@ function validatePersonDraft(draft, { isNew = false, relationshipMode = "", conn
   const occupationPattern = /^[\p{L}\p{N}\s.,'’\-–—()/$№]+$/u;
   if (name && (!personNamePattern.test(name) || name.length > 120)) errors.name = "ФИО укажите буквами, без цифр; максимум 120 знаков.";
   if (maidenName && (!personNamePattern.test(maidenName) || maidenName.length > 80)) errors.maidenName = "Фамилия должна содержать буквы и стандартные знаки препинания.";
-  const dateError = validateDateValue(draft?.year, draft?.datePrecision || (draft?.year && draft.year.length === 4 ? "year" : "exact"));
-  if (dateError) errors.year = dateError;
+  const dateReport = validateDateRecord(getDraftDateRecord(draft));
+  if (!dateReport.valid) errors.year = dateReport.error;
   if (place && (!placePattern.test(place) || place.length > 160)) errors.place = "Укажите город, область или страну без необычных символов; максимум 160 знаков.";
   if (occupation && (!occupationPattern.test(occupation) || occupation.length > 100)) errors.occupation = "Профессия содержит недопустимые символы или слишком длинная.";
   if (biography.length > 2000 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(biography)) errors.biography = "Биография слишком длинная или содержит недопустимые символы.";
@@ -308,7 +297,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   };
   const handleBack = () => setWizardStep((current) => Math.max(1, current - 1));
   const relationText = relationshipMode ? `Новый человек — ${relationLabel[relationshipMode]}` : "Новый человек";
-  const precision = draft.datePrecision || (draft.year && draft.year.length <= 4 ? "year" : "exact");
+  const precision = draft.datePrecision || inferDatePrecision(draft.year);
   const targetOptions = people.filter((person) => person.id !== draft.id);
   const relationTarget = targetOptions.find((person) => person.id === connectionTargetId);
   const relationSummary = relationshipMode ? `${relationLabel[relationshipMode]}; ${relationshipMode === "partner" ? partnershipTypeLabel[partnershipType] : relationTypeLabel[relationshipType]}; ${relationTarget?.name || "человек не выбран"}` : "Без связи — её можно добавить позже.";
@@ -323,14 +312,14 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <label className={`field field-full ${errors.name ? "has-error" : ""}`}><span>ФИО <em>необязательно</em></span><input autoFocus value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="Например, Иван Петров" aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
         <label className={`field ${errors.maidenName ? "has-error" : ""}`}><span>Девичья фамилия <em>необязательно</em></span><input value={draft.maidenName} onChange={(event) => update("maidenName", event.target.value)} placeholder="Не указано" aria-invalid={Boolean(errors.maidenName)} />{errors.maidenName && <small className="field-error">{errors.maidenName}</small>}</label>
         <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
-        <label className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span><input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder="Например, 1926" aria-invalid={Boolean(errors.year)} />{errors.year && <small className="field-error">{errors.year}</small>}</label>
-        <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => update("datePrecision", "unknown")}>Неизвестно</button></div><small className="field-hint">Допустимо: 1926, 12.05.1926 или «около 1926».</small></div>
+        <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
+        <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => { onChange({ ...draft, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }); setErrors((current) => ({ ...current, year: "" })); }}>Неизвестно</button></div><small className="field-hint">Допустимо: 1926, 12.05.1926, «около 1926» или диапазон 1940–1945.</small></div>
         <label className={`field field-full ${errors.place ? "has-error" : ""}`}><span>Место рождения <em>необязательно</em></span><div className="input-with-icon"><MapPin size={17} /><input value={draft.place} onChange={(event) => update("place", event.target.value)} placeholder="Город, область или страна" aria-invalid={Boolean(errors.place)} /></div>{errors.place && <small className="field-error">{errors.place}</small>}</label>
         <label className={`field field-full ${errors.occupation ? "has-error" : ""}`}><span>Профессия <em>необязательно</em></span><div className="input-with-icon"><Briefcase size={17} /><input value={draft.occupation} onChange={(event) => update("occupation", event.target.value)} placeholder="Например, учитель" aria-invalid={Boolean(errors.occupation)} /></div>{errors.occupation && <small className="field-error">{errors.occupation}</small>}</label>
         <label className={`field field-full ${errors.biography ? "has-error" : ""}`}><span>Краткая биография <em>необязательно</em></span><textarea value={draft.biography} onChange={(event) => update("biography", event.target.value)} placeholder="Важные события, интересы, воспоминания..." rows="5" aria-invalid={Boolean(errors.biography)} />{errors.biography && <small className="field-error">{errors.biography}</small>}</label>
         </>}
       </div>}
-      {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{draft.name.trim() || "Человек без имени"}</strong></div><div><span>Дата рождения</span><strong>{draft.year.trim() || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
+      {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{draft.name.trim() || "Человек без имени"}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
       <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button>{isNew && wizardStep > 1 && <button type="button" className="button button-secondary" onClick={handleBack}>Назад</button>}{isNew && wizardStep < 3 && <button type="button" className="button button-primary save-button" onClick={handleNext} disabled={wizardStep === 1 && Boolean(relationshipMode) && !connectionTargetId}>{wizardStep === 1 ? "К сведениям" : "К проверке"}</button>}{(!isNew || wizardStep === 3) && <button type="button" className="button button-primary save-button" onClick={handleSave}><FloppyDisk size={18} weight="bold" /> {isNew ? "Добавить человека" : "Сохранить"}</button>}</div>
     </div>
   );
@@ -1077,7 +1066,7 @@ export function App() {
   };
   const selectPerson = (id) => { setSelectedId(id); setQuery(""); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
   const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person) return; setSelectedId(id); setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${person.name || "без имени"}`); };
-  const openEditor = (person = null, relation = "") => { setDraft(person ? { ...person } : { ...blankPerson, id: "" }); setRelationshipMode(relation); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || ""); setRelationshipEditing(false); setInspectorOpen(true); setEditing(true); };
+  const openEditor = (person = null, relation = "") => { setDraft(person ? normalizePersonDate({ ...person }) : { ...blankPerson, id: "" }); setRelationshipMode(relation); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || ""); setRelationshipEditing(false); setInspectorOpen(true); setEditing(true); };
   const closeInspector = () => { setEditing(false); setRelationshipEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setInspectorOpen(false); };
   const requestDelete = (id) => { if (people.some((person) => person.id === id)) setDeleteConfirmId(id); };
   const deletePerson = () => {
@@ -1113,7 +1102,8 @@ export function App() {
     const validationErrors = validatePersonDraft(draft, { isNew: !draft?.id, relationshipMode, connectionTargetId });
     if (Object.keys(validationErrors).length) { setToast("Проверьте заполненные поля"); return; }
     const normalizedName = draft.name.trim() || "Человек без имени";
-    const personToSave = { ...draft, name: normalizedName, shortName: normalizedName };
+    const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
+    const personToSave = { ...draft, name: normalizedName, shortName: normalizedName, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
     if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedId(personToSave.id); setToast("Изменения сохранены"); } else {
       const newId = makeId(); const newPerson = { ...personToSave, id: newId };
       const relationTarget = people.find((person) => person.id === connectionTargetId);
