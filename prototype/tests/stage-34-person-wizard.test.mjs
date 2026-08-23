@@ -30,6 +30,23 @@ test("first person can be added without an unavailable relation target", () => {
   assert.match(stylesSource, /\.editor-empty-tree \.nested-field, \.editor-empty-tree \.field-hint/);
 });
 
+test("person creation wizard keeps navigation, cancel and save buttons wired", () => {
+  assert.match(appSource, /onClick=\{onCancel\}>Отмена/);
+  assert.match(appSource, /onClick=\{handleBack\}>Назад/);
+  assert.match(appSource, /onClick=\{handleNext\}/);
+  assert.match(appSource, /wizardStep === 1 \? "К сведениям" : "К проверке"/);
+  assert.match(appSource, /onClick=\{\(\) => handleSave\(true\)\}/);
+  assert.match(appSource, /Сохранить и добавить ещё одного/);
+  assert.match(appSource, /onClick=\{\(\) => handleSave\(false\)\}/);
+  assert.match(appSource, /\{isNew \? "Добавить человека" : "Сохранить"\}/);
+});
+
+test("new person records always have safe relation collections for the tree and inspector", () => {
+  assert.match(appSource, /partnerIds: \[\], childIds: \[\]/);
+  assert.match(appSource, /const newPerson = \{ \.\.\.personToSave, id: newId \}/);
+  assert.match(appSource, /const partnerIds = \[\.\.\.new Set\(\[\.\.\.\(person\.partnerIds \|\| \[\]\)/);
+});
+
 test("family situation markers survive project serialization and reopening", () => {
   const people = [{
     id: "child",

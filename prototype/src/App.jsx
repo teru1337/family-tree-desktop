@@ -72,7 +72,7 @@ function BrandMark({ className = "" }) {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
@@ -332,14 +332,15 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   if (!person) return <div className="detail-content empty-tree-state"><h2>Дерево пока пустое</h2><p>Добавьте первого человека, даже если известны только отдельные сведения.</p><button type="button" className="button button-primary" onClick={() => onAddRelative("")}><Plus size={18} /> Добавить человека</button></div>;
   const displayName = personDisplayName(person);
   const find = (id) => people.find((item) => item.id === id);
-  const parentLinks = person.parentLinks?.length ? person.parentLinks : person.parentIds.map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" }));
+  const parentIds = Array.isArray(person.parentIds) ? person.parentIds : [];
+  const parentLinks = person.parentLinks?.length ? person.parentLinks : parentIds.map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" }));
   const parents = parentLinks.map((link) => {
     const parent = find(link.personId);
     const roles = parentRelationshipRoles(link.type, parent, person);
     return { person: parent, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, source: link.source, relationshipId: link.id || makeParentLinkId(person.id, link.personId, link.type) };
   }).filter((item) => item.person);
   const relatedPartnerships = partnerships.filter((partnership) => partnership.personIds.includes(person.id));
-  const partnerIds = [...new Set([...person.partnerIds, ...relatedPartnerships.flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id))])];
+  const partnerIds = [...new Set([...(person.partnerIds || []), ...relatedPartnerships.flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id))])];
   const partners = partnerIds.map((partnerId) => {
     const partner = find(partnerId);
     const partnership = [...partnerships].reverse().find((item) => item.personIds.includes(person.id) && item.personIds.includes(partnerId));
@@ -347,7 +348,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
     const inverseRole = partnerRole(partner, partnership);
     return { person: partner, meta: `${partnershipDescription(partnership)} · вы для него: ${currentRole} · он/она для вас: ${inverseRole}`, source: partnership?.source, relationshipId: partnership?.id || `partnership-${[person.id, partnerId].sort().join("-")}` };
   }).filter((item) => item.person);
-  const children = person.childIds.map((childId) => {
+  const children = (person.childIds || []).map((childId) => {
     const child = find(childId);
     const parentLink = child?.parentLinks?.find((link) => link.personId === person.id);
     const type = parentLink?.type || "biological";
@@ -615,7 +616,7 @@ function RelationshipEditor({ person, people, partnerships, onSave, onDeleteRela
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
   const changeKind = (kind) => setDraft((current) => ({ ...current, kind, parentType: kind === "sibling" ? "biological" : (kind === "parent" || kind === "child") ? "biological" : current.parentType }));
   const knownPartnerIds = new Set(partnerships.filter((partnership) => partnership.personIds.includes(person.id)).flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id)));
-  const currentPartnerIds = new Set([...person.partnerIds.filter((id) => !knownPartnerIds.has(id)), ...partnerships.filter((partnership) => partnership.status === "active" && partnership.personIds.includes(person.id)).flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id))]);
+  const currentPartnerIds = new Set([...(person.partnerIds || []).filter((id) => !knownPartnerIds.has(id)), ...partnerships.filter((partnership) => partnership.status === "active" && partnership.personIds.includes(person.id)).flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id))]);
   const targetOptions = people.filter((item) => item.id !== person.id && (draft.kind !== "divorce" || currentPartnerIds.has(item.id)));
   const targetId = targetOptions.some((item) => item.id === draft.targetId) ? draft.targetId : targetOptions[0]?.id || "";
   const isParent = draft.kind === "parent" || draft.kind === "child";
