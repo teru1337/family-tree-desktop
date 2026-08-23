@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   Camera,
@@ -50,6 +50,8 @@ import {
 import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate, validateDateRecord } from "./dates.js";
 import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
 import { DEFAULT_SEARCH_FILTERS, filterPeople } from "./search.js";
+import { createRenderIndex, visibleEdges } from "./render-index.js";
+import { runBackgroundExport } from "./export-worker-client.js";
 import { explainUserError } from "./ui-feedback.js";
 import {
   EXPORT_QUALITY,
@@ -504,21 +506,25 @@ function buildTreeLayout(people, partnerships = [], options = {}) {
   return { generations, positions, width, height, top, cardWidth, cardHeight, columnStep, rowStep };
 }
 
-function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null }) {
+function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, renderIndex = null }) {
   const byId = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
-  const parentEdges = useMemo(() => people.flatMap((child) => getParentIds(child).map((parentId) => ({ child, parent: byId.get(parentId), type: child.parentLinks?.find((link) => link.personId === parentId)?.type || "biological" }))).filter((edge) => edge.parent && positions[edge.parent.id] && positions[edge.child.id] && (!visibleIds || visibleIds.has(edge.parent.id) || visibleIds.has(edge.child.id))), [people, byId, positions, visibleIds]);
-  const partnerEdges = useMemo(() => partnerships.map((partnership) => ({ partnership, first: byId.get(partnership.personIds?.[0]), second: byId.get(partnership.personIds?.[1]) })).filter((edge) => edge.first && edge.second && positions[edge.first.id] && positions[edge.second.id] && (!visibleIds || visibleIds.has(edge.first.id) || visibleIds.has(edge.second.id))), [partnerships, byId, positions, visibleIds]);
+  const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships, byId), [people, partnerships, byId]);
+  const index = renderIndex || fallbackIndex;
+  const parentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds).filter((edge) => positions[edge.parent.id] && positions[edge.child.id]), [index, positions, visibleIds]);
+  const partnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds).filter((edge) => positions[edge.first.id] && positions[edge.second.id]), [index, positions, visibleIds]);
   return <svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const from = positions[parent.id]; const to = positions[child.id]; const startX = from.left + from.width / 2; const startY = from.top + from.height; const endX = to.left + to.width / 2; const endY = to.top; const middleY = startY + Math.max(24, (endY - startY) / 2); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""}`} d={`M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const a = positions[first.id]; const b = positions[second.id]; const start = a.left < b.left ? a : b; const end = a.left < b.left ? b : a; const startX = start.left + start.width; const startY = start.top + start.height / 2; const endX = end.left; const endY = end.top + end.height / 2; const middleX = startX + Math.max(18, (endX - startX) / 2); const label = partnership.status === "divorced" ? "Развод" : partnershipTypeLabel[partnership.type] || "Связь"; return <g key={partnership.id}><path className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""}`} d={`M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}`} /><text className="partnership-label" x={middleX} y={Math.min(startY, endY) - 8} textAnchor="middle">{label}</text></g>; })}</g></svg>;
 }
 
-function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewportSize, onNavigate }) {
+function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewportSize, onNavigate, renderIndex = null }) {
   const mapWidth = 204;
   const mapHeight = 136;
   const padding = 9;
   const scale = Math.min((mapWidth - padding * 2) / layout.width, (mapHeight - padding * 2) / layout.height);
   const point = (position) => ({ x: padding + position.left * scale, y: padding + position.top * scale, width: position.width * scale, height: position.height * scale });
-  const parentLines = people.flatMap((child) => getParentIds(child).map((parentId) => ({ parent: positions[parentId], child: positions[child.id] }))).filter((edge) => edge.parent && edge.child);
-  const partnerLines = partnerships.map((partnership) => ({ first: positions[partnership.personIds?.[0]], second: positions[partnership.personIds?.[1]] })).filter((edge) => edge.first && edge.second);
+  const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships), [people, partnerships]);
+  const index = renderIndex || fallbackIndex;
+  const parentLines = index.parentEdges.map(({ parent, child }) => ({ parent: positions[parent.id], child: positions[child.id] })).filter((edge) => edge.parent && edge.child);
+  const partnerLines = index.partnershipEdges.map(({ partnership, first, second }) => ({ partnership, first: positions[first.id], second: positions[second.id] })).filter((edge) => edge.first && edge.second);
   const viewportWidth = viewportSize.width ? viewportSize.width / zoom : 0;
   const viewportHeight = viewportSize.height ? viewportSize.height / zoom : 0;
   const visibleBoard = { x: Math.max(0, -pan.x / zoom), y: Math.max(0, -pan.y / zoom), width: Math.min(layout.width, viewportWidth), height: Math.min(layout.height, viewportHeight) };
@@ -539,6 +545,8 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const [personDraggingId, setPersonDraggingId] = useState("");
   const [manualOffsets, setManualOffsets] = useState({});
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
+  const renderIndex = useMemo(() => createRenderIndex(people, partnerships, peopleById), [people, partnerships, peopleById]);
   const renderedPositions = useMemo(() => Object.fromEntries(Object.entries(layout.positions).map(([id, position]) => {
     const offset = manualOffsets[id] || { x: 0, y: 0 };
     return [id, { ...position, left: position.left + offset.x, top: position.top + offset.y }];
@@ -694,8 +702,8 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
-      {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} />}
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
   );
@@ -913,6 +921,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
   const [fontScale, setFontScale] = useState("standard");
   const [connectionDensity, setConnectionDensity] = useState("normal");
   const [busy, setBusy] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewBusy, setPreviewBusy] = useState(true);
   const [previewError, setPreviewError] = useState("");
@@ -979,26 +988,32 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
 
   const runExport = async () => {
     setBusy(true);
-    try {
+    setExportProgress("Подготавливаю файл…");
+    const baseName = `семейное-древо-${new Date().toISOString().slice(0, 10)}`;
+    const createExportInMainThread = async () => {
       const rendered = await renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap });
-      const baseName = `семейное-древо-${new Date().toISOString().slice(0, 10)}`;
-      if (format === "png") {
-        downloadBlob(await canvasToBlob(rendered.canvas, "image/png"), `${baseName}.png`);
-        onToast("PNG-файл подготовлен");
-      } else if (format === "tiff") {
-        downloadBlob(canvasToTiff(rendered.canvas), `${baseName}.tiff`);
-        onToast("TIFF-файл подготовлен");
-      } else {
-        const pdf = await buildPdfFromCanvas(rendered.canvas, { mode: exportMode, paper, orientation, posterPlan });
-        const suffix = exportMode === "poster" ? "плакат" : "печать";
-        downloadBlob(pdf, `${baseName}-${suffix}.pdf`);
-        onToast(exportMode === "poster" ? "PDF-плакат подготовлен" : "PDF для печати подготовлен");
+      if (format === "png") return { blob: await canvasToBlob(rendered.canvas, "image/png"), fileName: `${baseName}.png`, message: "PNG-файл подготовлен" };
+      if (format === "tiff") return { blob: canvasToTiff(rendered.canvas), fileName: `${baseName}.tiff`, message: "TIFF-файл подготовлен" };
+      const pdf = await buildPdfFromCanvas(rendered.canvas, { mode: exportMode, paper, orientation, posterPlan });
+      return { blob: pdf, fileName: `${baseName}-${exportMode === "poster" ? "плакат" : "печать"}.pdf`, message: exportMode === "poster" ? "PDF-плакат подготовлен" : "PDF для печати подготовлен" };
+    };
+    try {
+      let result;
+      try {
+        result = await runBackgroundExport({ people, partnerships, layout, treeStyle, showPhotos, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap, format: format === "print" ? "pdf" : format, mode: exportMode, paper, orientation, posterPlan }, { onProgress: ({ label }) => setExportProgress(label) });
+      } catch (error) {
+        if (!error.isBackgroundExportError) throw error;
+        setExportProgress("Фоновый режим недоступен, готовлю файл…");
+        result = await createExportInMainThread();
       }
+      downloadBlob(result.blob, result.fileName);
+      onToast(result.message);
       onClose();
     } catch (error) {
       onToast(explainUserError(error, { action: "Не удалось подготовить файл", next: "проверьте формат и параметры экспорта, затем повторите" }));
     } finally {
       setBusy(false);
+      setExportProgress("");
     }
   };
 
@@ -1016,7 +1031,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
           <div className="export-summary"><div><strong>{pixelWidth.toLocaleString("ru-RU")} × {pixelHeight.toLocaleString("ru-RU")} пикселей</strong><span>Текущее дерево: {people.length} человек · {layout.generations.length} поколения</span>{exportMode === "poster" && <span>Авторазмер плаката: {posterPlan.widthCm} × {posterPlan.heightCm} см · {posterPlan.generations} поколений</span>}</div>{(format === "pdf" || format === "print") && <span>{exportMode === "poster" ? "1 лист-плакат" : `${pageCount} ${pageCount === 1 ? "лист" : pageCount < 5 ? "листа" : "листов"}`}</span>}</div>
           <div className="backup-note"><Info size={16} /> PNG подходит для семейного альбома, TIFF — для типографии, PDF — для домашней печати и большого плаката.</div>
         </div>
-        <div className="export-footer"><button type="button" className="button button-ghost" onClick={onClose} disabled={busy}>Отмена</button><button type="button" className="button button-primary" onClick={runExport} disabled={busy}>{busy ? "Подготавливаю…" : "Создать файл"}</button></div>
+        <div className="export-footer"><button type="button" className="button button-ghost" onClick={onClose} disabled={busy}>Отмена</button><button type="button" className="button button-primary" onClick={runExport} disabled={busy}>{busy ? exportProgress || "Подготавливаю…" : "Создать файл"}</button></div>
       </section>
     </div>
   );
@@ -1090,8 +1105,9 @@ export function App() {
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
   if (!historyRef.current) historyRef.current = createHistory(createSnapshot(people, partnerships, projectMeta));
   const treeLayout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
+  const deferredQuery = useDeferredValue(query);
   const hasActiveSearch = query.trim() || searchFilters.generation !== "all" || searchFilters.relation !== "all" || searchFilters.yearFrom || searchFilters.yearTo || searchFilters.place.trim();
-  const searchResults = useMemo(() => filterPeople(people, partnerships, treeLayout.positions, query, searchFilters), [people, partnerships, query, searchFilters, treeLayout.positions]);
+  const searchResults = useMemo(() => filterPeople(people, partnerships, treeLayout.positions, deferredQuery, searchFilters), [people, partnerships, deferredQuery, searchFilters, treeLayout.positions]);
   const applyHistorySnapshot = (snapshot) => {
     setPeople(snapshot.people);
     setPartnerships(snapshot.partnerships);

@@ -20,8 +20,8 @@ test("large trees use viewport-aware node and connector rendering", () => {
 });
 
 test("relationship connectors use an index instead of repeated people.find calls", () => {
-  assert.match(appSource, /const byId = useMemo\(\(\) => new Map\(people\.map/);
-  assert.match(appSource, /parent: byId\.get\(parentId\)/);
-  assert.match(appSource, /first: byId\.get\(partnership\.personIds\?\.\[0\]\)/);
+  assert.match(appSource, /createRenderIndex/);
+  assert.match(appSource, /visibleEdges\(index\.parentEdges/);
+  assert.match(appSource, /visibleEdges\(index\.partnershipEdges/);
   assert.doesNotMatch(appSource, /people\.find\(\(person\) => person\.id === partnership\.personIds/);
 });

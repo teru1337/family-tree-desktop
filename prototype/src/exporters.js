@@ -89,7 +89,8 @@ async function imageToDataUrl(source) {
   if (!source) return null;
   if (source.startsWith("data:")) return source;
   try {
-    const response = await fetch(new URL(source, window.location.href));
+    const baseUrl = typeof window !== "undefined" ? window.location.href : self.location.href;
+    const response = await fetch(new URL(source, baseUrl));
     if (!response.ok) return null;
     const contentType = response.headers.get("content-type") || "image/png";
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -300,14 +301,29 @@ function canvasToJpegDataUrl(canvas) {
   return canvas.toDataURL("image/jpeg", 0.93);
 }
 
-function makeTileCanvas(source, x, y, width, height) {
+function makeTileCanvas(source, x, y, width, height, { pageNumber = 1, pageCount = 1 } = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d");
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
-  context.drawImage(source, x, y, Math.min(width, source.width - x), Math.min(height, source.height - y), 0, 0, Math.min(width, source.width - x), Math.min(height, source.height - y));
+  const drawWidth = Math.min(width, source.width - x);
+  const drawHeight = Math.min(height, source.height - y);
+  context.drawImage(source, x, y, drawWidth, drawHeight, 0, 0, drawWidth, drawHeight);
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.92)";
+  context.strokeStyle = "#9aa5b2";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.roundRect?.(12, 12, 118, 24, 5);
+  if (!context.roundRect) context.rect(12, 12, 118, 24);
+  context.fill();
+  context.stroke();
+  context.fillStyle = "#334155";
+  context.font = "600 12px Segoe UI, Arial, sans-serif";
+  context.fillText(`Лист ${pageNumber} из ${pageCount}`, 20, 28);
+  context.restore();
   return canvas;
 }
 
@@ -331,7 +347,8 @@ export async function buildPdfFromCanvas(canvas, { mode = "poster", paper = "a4"
   const pages = [];
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
-      const tile = makeTileCanvas(canvas, column * tileWidth, row * tileHeight, tileWidth, tileHeight);
+      const pageNumber = row * columns + column + 1;
+      const tile = makeTileCanvas(canvas, column * tileWidth, row * tileHeight, tileWidth, tileHeight, { pageNumber, pageCount: columns * rows });
       pages.push({ dataUrl: canvasToJpegDataUrl(tile), width: tile.width, height: tile.height });
     }
   }
