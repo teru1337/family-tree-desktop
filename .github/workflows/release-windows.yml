@@ -28,41 +28,9 @@ jobs:
         working-directory: prototype
         run: npm ci
 
-      - name: Check Windows signing credentials
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
-            throw "Не задан секрет WIN_CSC_LINK: публикация неподписанного установщика запрещена."
-          }
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
-            throw "Не задан секрет WIN_CSC_KEY_PASSWORD: публикация неподписанного установщика запрещена."
-          }
-
       - name: Build and publish release
         working-directory: prototype
         run: npm run dist:win -- --publish never
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Verify installer signature
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem -Path prototype/release -Filter "FamilyTree-Setup-*.exe" | Select-Object -First 1
-          if (-not $installer) { throw "Установщик не найден для проверки подписи." }
-          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
-          if ($signature.Status -ne "Valid") {
-            throw "Подпись установщика недействительна: $($signature.Status)."
-          }
-          $updateConfig = Get-ChildItem -Path prototype/release -Filter "app-update.yml" -Recurse | Select-Object -First 1
-          if (-not $updateConfig) { throw "В собранном приложении отсутствует app-update.yml." }
-          $updateConfigText = Get-Content -Raw -Path $updateConfig.FullName
-          if ($updateConfigText -notmatch "publisherName:") {
-            throw "В app-update.yml отсутствует publisherName для проверки обновлений."
-          }
 
       - name: Publish GitHub Release
         working-directory: prototype

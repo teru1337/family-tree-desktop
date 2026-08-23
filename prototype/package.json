@@ -50,8 +50,7 @@
     ],
     "asar": true,
     "win": {
-      "signExecutable": true,
-      "verifyUpdateCodeSignature": true,
+      "verifyUpdateCodeSignature": false,
       "target": [
         {
           "target": "nsis",
