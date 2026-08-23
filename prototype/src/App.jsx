@@ -45,6 +45,7 @@ import {
   readBackups,
   readWorkingCopy,
   serializeProject,
+  verifyBackup,
   writeWorkingCopy,
 } from "./storage.js";
 import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate, validateDateRecord } from "./dates.js";
@@ -782,6 +783,10 @@ function downloadProjectFile(payload, fileName) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function fileNameFromPath(value) {
+  return String(value || "").split(/[\\/]/).pop() || "";
+}
+
 function ConfirmModal({ title, description, confirmLabel, onClose, onConfirm }) {
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
@@ -905,14 +910,23 @@ function InstructionModal({ onClose }) {
   );
 }
 
-function BackupModal({ backups, onClose, onRestore, onDownload }) {
+function BackupModal({ backups, projectMeta, lastSavedAt, lastBackupAt, onClose, onRestore, onDownload }) {
+  const [verification, setVerification] = useState(null);
   const reasonLabels = { auto: "Автокопия", save: "После сохранения", "before-open": "Перед открытием", "before-restore": "Перед восстановлением", "before-delete": "Перед удалением", "before-new": "Перед созданием нового дерева" };
+  const verifySelectedBackup = (backup) => setVerification({ backup, report: verifyBackup(backup) });
+  const restoreVerifiedBackup = () => {
+    if (!verification?.report?.valid) return;
+    onRestore(verification.backup, verification.report);
+    setVerification(null);
+  };
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
       <section className="backup-modal" role="dialog" aria-modal="true" aria-labelledby="backup-modal-title" onClick={(event) => event.stopPropagation()}>
-        <div className="backup-modal-header"><div><span className="eyebrow">Локальное хранение</span><h2 id="backup-modal-title">Резервные копии</h2><p>Копии хранятся на этом компьютере в текущем браузере.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть резервные копии"><X size={21} /></button></div>
-        {backups.length === 0 ? <div className="backup-empty"><ClockCounterClockwise size={32} /><strong>Автоматических копий пока нет</strong><span>После изменения данных копия появится здесь автоматически.</span></div> : <div className="backup-list">{backups.map((backup) => <article className="backup-item" key={backup.id}><div className="backup-item-icon"><ClockCounterClockwise size={19} /></div><div className="backup-meta"><strong>{formatDateTime(backup.createdAt)}</strong><span>{reasonLabels[backup.reason] || "Резервная копия"} · людей: {backup.peopleCount}</span></div><div className="backup-actions"><button type="button" className="button button-ghost" onClick={() => onDownload(backup)}><DownloadSimple size={17} /> Скачать</button><button type="button" className="button button-secondary" onClick={() => onRestore(backup)}>Восстановить</button></div></article>)}</div>}
-        <div className="backup-note"><Info size={16} /> Для защиты от потери данных периодически сохраняйте файл проекта на внешний диск или флешку.</div>
+        <div className="backup-modal-header"><div><span className="eyebrow">Сохранение и восстановление</span><h2 id="backup-modal-title">Резервные копии</h2><p>Перед восстановлением приложение отдельно проверяет выбранную копию проекта.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть резервные копии"><X size={21} /></button></div>
+        <div className="backup-project-summary"><div><span>Текущий проект</span><strong>{projectMeta?.title || "Моё семейное древо"}</strong><small>{projectMeta?.fileName || "семейное-древо.familytree"}</small></div><div><span>Путь к файлу</span><strong className="backup-path-value">{projectMeta?.filePath || "Путь появится после сохранения через окно приложения"}</strong></div><div><span>Последнее сохранение</span><strong>{lastSavedAt ? formatDateTime(lastSavedAt) : "Ещё не сохранялся"}</strong><small>Последняя копия: {lastBackupAt ? formatDateTime(lastBackupAt) : "нет"}</small></div></div>
+        {verification && <div className={`backup-verification ${verification.report.valid ? "backup-verification-valid" : "backup-verification-invalid"}`} role="status"><div className="backup-verification-copy"><strong>{verification.report.valid ? "Копия прошла проверку" : "Копия не прошла проверку"}</strong><span>{verification.report.valid ? `Людей: ${verification.report.peopleCount} · связей: ${verification.report.relationCount}${verification.report.warnings.length ? ` · замечаний: ${verification.report.warnings.length}` : ""}` : verification.report.error}</span>{verification.report.valid && verification.report.warnings.length > 0 && <small>{verification.report.warnings.slice(0, 2).join(" ")}</small>}</div><div className="backup-verification-actions"><button type="button" className="button button-ghost" onClick={() => setVerification(null)}>Отмена</button>{verification.report.valid && <button type="button" className="button button-primary" onClick={restoreVerifiedBackup}>Восстановить проверенную копию</button>}</div></div>}
+        {backups.length === 0 ? <div className="backup-empty"><ClockCounterClockwise size={32} /><strong>Автоматических копий пока нет</strong><span>После изменения данных копия появится здесь автоматически.</span></div> : <div className="backup-list">{backups.map((backup) => <article className="backup-item" key={backup.id}><div className="backup-item-icon"><ClockCounterClockwise size={19} /></div><div className="backup-meta"><strong>{formatDateTime(backup.createdAt)}</strong><span>{reasonLabels[backup.reason] || "Резервная копия"} · людей: {backup.peopleCount}</span></div><div className="backup-actions"><button type="button" className="button button-ghost" onClick={() => onDownload(backup)}><DownloadSimple size={17} /> Скачать</button><button type="button" className="button button-secondary" onClick={() => verifySelectedBackup(backup)}>Проверить и восстановить</button></div></article>)}</div>}
+        <div className="backup-note"><Info size={16} /> Для защиты от потери данных периодически скачивайте файл проекта на внешний диск или флешку. Восстановление не изменится, пока вы не подтвердите проверенную копию.</div>
       </section>
     </div>
   );
@@ -1626,23 +1640,43 @@ export function App() {
     setDirty(false);
     return normalized;
   };
-  const saveProject = () => {
+  const saveProjectToFile = async () => {
+    const payload = buildPayload();
+    const suggestedName = projectMeta.fileName || "семейное-древо.familytree";
+    const saveWithDesktop = window.familyTreeDesktop?.saveProjectFile;
+    if (!saveWithDesktop) {
+      downloadProjectFile(payload, suggestedName);
+      return { canceled: false, payload, projectMeta };
+    }
+    const result = await saveWithDesktop(payload, suggestedName, projectMeta.filePath || "");
+    if (result?.canceled) return { canceled: true };
+    const filePath = result?.filePath || projectMeta.filePath || "";
+    const nextProjectMeta = { ...projectMeta, fileName: fileNameFromPath(filePath) || suggestedName, filePath };
+    return { canceled: false, payload: createProjectPayload(people, nextProjectMeta, partnerships), projectMeta: nextProjectMeta };
+  };
+  const saveProject = async () => {
     try {
-      const payload = buildPayload();
-      downloadProjectFile(payload, projectMeta.fileName || "семейное-древо.familytree");
-      const normalized = commitLocalSave(payload);
+      const saved = await saveProjectToFile();
+      if (saved.canceled) {
+        setToast("Сохранение отменено");
+        return;
+      }
+      const normalized = commitLocalSave(saved.payload);
+      setProjectMeta(saved.projectMeta);
       const warningCount = normalized.validationWarnings?.length || 0;
-      setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : `Проект сохранён: ${projectMeta.fileName || "семейное-древо.familytree"}`);
+      setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : `Проект сохранён: ${saved.projectMeta.fileName || "семейное-древо.familytree"}`);
     } catch (error) {
       setToast(explainUserError(error, { action: "Не удалось сохранить проект", next: "проверьте свободное место и доступ к папке загрузок" }));
     }
   };
-  const saveForContinuation = () => {
-    const payload = buildPayload();
-    downloadProjectFile(payload, projectMeta.fileName || "семейное-древо.familytree");
-    const normalized = commitLocalSave(payload);
+  const saveForContinuation = async () => {
+    const saved = await saveProjectToFile();
+    if (saved.canceled) return false;
+    const normalized = commitLocalSave(saved.payload);
+    setProjectMeta(saved.projectMeta);
     const warningCount = normalized.validationWarnings?.length || 0;
     setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : "Проект сохранён");
+    return true;
   };
   const saveCopy = () => {
     const payload = buildPayload();
@@ -1670,10 +1704,11 @@ export function App() {
         setLastBackupAt(backup?.createdAt || null);
       }
       const payload = normalizeProject(JSON.parse(await file.text()));
+      const loadedFilePath = typeof file.path === "string" ? file.path : "";
       const loadedPayload = { ...payload, project: { ...payload.project, fileName: file.name } };
       writeWorkingCopy(loadedPayload);
       const loadedSettings = { ...defaultProjectSettings, ...(loadedPayload.project.settings || {}) };
-      const nextProjectMeta = { ...loadedPayload.project, settings: loadedSettings };
+      const nextProjectMeta = { ...loadedPayload.project, settings: loadedSettings, filePath: loadedFilePath };
       resetHistory(loadedPayload.people, loadedPayload.partnerships || [], nextProjectMeta);
       setPeople(payload.people);
       setPartnerships(loadedPayload.partnerships || []);
@@ -1702,7 +1737,7 @@ export function App() {
       const restoredSettings = { ...defaultProjectSettings, ...(payload.project.settings || {}) };
       setPeople(payload.people);
       setPartnerships(payload.partnerships || []);
-      setProjectMeta({ ...payload.project, settings: restoredSettings });
+      setProjectMeta({ ...payload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" });
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
@@ -1747,16 +1782,20 @@ export function App() {
   };
   const openInstruction = (fromMenu = false) => { setMainMenuOpen(false); setMoreOpen(false); setReturnToMenuAfterModal(fromMenu ? "instruction" : ""); setInstructionOpen(true); };
   const openSettings = (fromMenu = false) => { setMainMenuOpen(false); setMoreOpen(false); setReturnToMenuAfterModal(fromMenu ? "settings" : ""); setSettingsOpen(true); };
-  const continueAfterUnsavedChoice = (saveChanges) => {
+  const continueAfterUnsavedChoice = async (saveChanges) => {
     const action = pendingUnsavedAction;
-    setPendingUnsavedAction(null);
-    try {
-      if (saveChanges) saveForContinuation();
-      else setDirty(false);
-    } catch (error) {
-      setToast(explainUserError(error, { action: "Не удалось сохранить изменения", next: "проверьте свободное место и повторите действие" }));
-      return;
+    if (saveChanges) {
+      try {
+        const saved = await saveForContinuation();
+        if (!saved) return;
+      } catch (error) {
+        setToast(explainUserError(error, { action: "Не удалось сохранить изменения", next: "проверьте свободное место и повторите действие" }));
+        return;
+      }
+    } else {
+      setDirty(false);
     }
+    setPendingUnsavedAction(null);
     if (action?.type === "open") openProject(true);
     if (action?.type === "new-tree") createNewTree(action.fromMenu, true);
     if (action?.type === "exit") exitApplication(true);
@@ -1783,7 +1822,7 @@ export function App() {
     }
     setPeople([]);
     setPartnerships([]);
-    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos } });
+    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos } });
     setSelectedId("");
     setPan({ x: 0, y: 0 });
     setZoom(1);
@@ -1842,10 +1881,10 @@ export function App() {
            {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}
          </aside>
        </main>
-       <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
+       <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
        {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
-       {backupOpen && <BackupModal backups={backups} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
+       {backupOpen && <BackupModal backups={backups} projectMeta={projectMeta} lastSavedAt={lastSavedAt} lastBackupAt={lastBackupAt} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
        {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onClose={() => setViewSettingsOpen(false)} />}
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} onClose={() => setExportModalOpen(false)} onToast={setToast} />}

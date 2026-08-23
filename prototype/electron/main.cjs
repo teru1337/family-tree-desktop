@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const http = require("node:http");
 const fs = require("node:fs");
@@ -194,6 +194,22 @@ if (!hasSingleInstance) {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
   ipcMain.handle("family-tree-version", () => app.getVersion());
+  ipcMain.handle("family-tree-save-project-file", async (_event, request = {}) => {
+    const suggestedName = path.basename(String(request.suggestedName || "семейное-древо.familytree"));
+    let filePath = String(request.filePath || "");
+    if (!path.isAbsolute(filePath)) filePath = "";
+    if (!filePath) {
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "Сохранить семейное древо",
+        defaultPath: path.join(app.getPath("documents"), suggestedName),
+        filters: [{ name: "Файл семейного древа", extensions: ["familytree"] }, { name: "Все файлы", extensions: ["*"] }],
+      });
+      if (result.canceled || !result.filePath) return { canceled: true };
+      filePath = result.filePath;
+    }
+    await fs.promises.writeFile(filePath, JSON.stringify(request.payload || {}, null, 2), "utf8");
+    return { canceled: false, filePath };
+  });
   ipcMain.handle("family-tree-update-check", () => checkForUpdates());
   ipcMain.handle("family-tree-update-download", async () => {
     await autoUpdater.downloadUpdate();

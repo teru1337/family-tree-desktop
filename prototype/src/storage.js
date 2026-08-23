@@ -557,6 +557,27 @@ export function normalizeProject(raw) {
   };
 }
 
+export function verifyBackup(record) {
+  try {
+    const payload = normalizeProject(record?.payload);
+    return {
+      valid: true,
+      peopleCount: payload.people.length,
+      relationCount: payload.relations.length,
+      warnings: payload.validationWarnings || [],
+      payload,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      peopleCount: 0,
+      relationCount: 0,
+      warnings: [],
+      error: String(error?.message || "Копия не прошла проверку целостности."),
+    };
+  }
+}
+
 function toPersistedPayload(normalized) {
   return {
     manifest: { ...normalized.manifest, version: PROJECT_VERSION, schemaVersion: PROJECT_VERSION },
