@@ -160,6 +160,7 @@ function createWindow(port) {
     },
   });
 
+  mainWindow.maximize();
   mainWindow.removeMenu();
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.once("ready-to-show", () => mainWindow.show());

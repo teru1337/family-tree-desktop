@@ -28,6 +28,7 @@ assert.match(workflow, /latest\.yml/);
 assert.match(workflow, /GH_TOKEN:/);
 assert.match(mainProcess, /autoUpdater\.checkForUpdates/);
 assert.match(mainProcess, /autoUpdater\.downloadUpdate/);
+assert.match(mainProcess, /mainWindow\.maximize\(\)/);
 assert.match(preload, /family-tree-update-status/);
 await access(new URL("../electron/main.cjs", import.meta.url));
 await access(new URL("../electron/preload.cjs", import.meta.url));
