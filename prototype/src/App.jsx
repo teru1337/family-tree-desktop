@@ -481,12 +481,15 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   const [errors, setErrors] = useState({});
   const [wizardStep, setWizardStep] = useState(isNew ? 1 : 2);
   const photoInputRef = useRef(null);
+  const targetOptions = people.filter((person) => person.id !== draft.id);
+  const firstPerson = isNew && targetOptions.length === 0;
   useEffect(() => { setWizardStep(isNew ? 1 : 2); setErrors({}); }, [isNew, draft?.id]);
   const update = (field, value) => {
     onChange({ ...draft, [field]: value });
     setErrors((current) => ({ ...current, [field]: "" }));
   };
   const changeRelationMode = (value) => {
+    if (firstPerson && value) return;
     onRelationChange(value);
     if (!value) onRelationshipTypeChange("biological");
     if (value !== "parent") onUnknownParentChange(false);
@@ -498,6 +501,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
     setErrors((current) => ({ ...current, connectionTargetId: "" }));
   };
   const chooseUnknownParent = () => {
+    if (firstPerson) return;
     onRelationChange("parent");
     onRelationshipTypeChange("biological");
     onUnknownParentChange(true);
@@ -506,6 +510,16 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
     onSiblingWithoutParentsChange(false);
     setErrors((current) => ({ ...current, connectionTargetId: "" }));
   };
+  useEffect(() => {
+    if (!firstPerson || !relationshipMode) return;
+    onRelationChange("");
+    onRelationshipTypeChange("biological");
+    onConnectionTargetChange("");
+    onUnknownParentChange(false);
+    onSingleKnownParentChange(false);
+    onOutOfMarriageChange(false);
+    onSiblingWithoutParentsChange(false);
+  }, [firstPerson, relationshipMode]);
   const changeConnectionTarget = (value) => {
     onConnectionTargetChange(value);
     setErrors((current) => ({ ...current, connectionTargetId: "" }));
@@ -538,6 +552,11 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   };
   const handleNext = () => {
     if (wizardStep === 1) {
+      if (firstPerson && relationshipMode) {
+        changeRelationMode("");
+        setWizardStep(2);
+        return;
+      }
       if (relationshipMode && !connectionTargetId) {
         setErrors({ connectionTargetId: "Выберите человека, с которым нужно установить связь." });
         return;
@@ -553,7 +572,6 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   const displayUnknown = Boolean(draft.isUnknown || unknownParent);
   const relationText = unknownParent ? "Новый человек — неизвестный родитель" : relationshipMode ? `Новый человек — ${relationLabel[relationshipMode]}` : "Новый человек";
   const precision = draft.datePrecision || inferDatePrecision(draft.year);
-  const targetOptions = people.filter((person) => person.id !== draft.id);
   const relationTarget = targetOptions.find((person) => person.id === connectionTargetId);
   const scenarioLabels = [singleKnownParent && familyContextLabel["single-known-parent"], outOfMarriage && familyContextLabel["out-of-marriage"], siblingWithoutParents && familyContextLabel["sibling-without-parents"]].filter(Boolean);
   const scenarioSummary = scenarioLabels.join(" · ");
@@ -561,7 +579,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   const baseRelationDescription = unknownParent ? "Будет создана отдельная карточка «Неизвестный человек» как родитель выбранного человека. Её можно заполнить позже." : relationshipMode === "parent" ? (relationshipType === "step" ? "Новый человек станет отчимом или мачехой выбранной записи." : relationshipType === "adoptive" ? "Новый человек станет усыновителем выбранной записи." : relationshipType === "guardian" ? "Новый человек будет указан как опекун выбранной записи." : relationshipType === "unknown" ? "Родительская связь будет сохранена без уточнения происхождения." : "Новый человек станет биологическим родителем выбранной записи.") : relationshipMode === "child" ? (relationshipType === "step" ? "Новый человек станет пасынком или падчерицей выбранной записи." : relationshipType === "adoptive" ? "Новый человек будет отмечен как усыновлённый ребёнок выбранной записи." : relationshipType === "guardian" ? "Новый человек будет связан с выбранным человеком отношением опеки." : relationshipType === "unknown" ? "Связь с ребёнком будет сохранена без уточнения происхождения." : "Новый человек станет биологическим ребёнком выбранной записи.") : relationshipMode === "sibling" ? `Новый человек будет добавлен как ${siblingTypeLabel[relationshipType]?.toLocaleLowerCase("ru") || "брат или сестра"}.` : relationshipMode === "partner" ? `Новый человек будет добавлен как ${partnershipType === "marriage" ? "супруг или супруга" : "партнёр"}. Можно сохранить и добавить ещё одного — существующие союзы не заменяются.` : "Можно сохранить человека без связи и добавить её позже.";
   const relationDescription = [baseRelationDescription, singleKnownParent && "Будет отмечено, что известен только один родитель; второго человека приложение не создаёт.", outOfMarriage && "Будет отмечено, что ребёнок родился вне брака; брак автоматически не создаётся.", siblingWithoutParents && "Связь брата или сестры создаётся без автоматического добавления родителей."].filter(Boolean).join(" ");
   return (
-    <div className="editor-content">
+    <div className={`editor-content ${firstPerson && wizardStep === 1 ? "editor-empty-tree" : ""}`}>
       <div className="editor-intro"><div className="editor-photo-wrap"><PersonAvatar person={draft} large /><button type="button" className="photo-action" onClick={() => photoInputRef.current?.click()}><Camera size={16} /> {draft.image ? "Заменить фото" : "Добавить фото"}</button><input ref={photoInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={choosePhoto} />{errors.image && <small className="field-error photo-error">{errors.image}</small>}</div><div><span className="eyebrow">{isNew ? relationText : "Редактирование"}</span><h2>{isNew ? "Добавить человека" : "Изменить сведения"}</h2><p>Заполните только то, что известно. Остальные поля можно оставить пустыми.</p></div></div>
       {isNew && <div className="wizard-progress" aria-label={`Шаг ${wizardStep} из 3`}><div className={wizardStep >= 1 ? "current" : ""}><span>1</span><strong>Связь</strong></div><div className={wizardStep >= 2 ? "current" : ""}><span>2</span><strong>Сведения</strong></div><div className={wizardStep >= 3 ? "current" : ""}><span>3</span><strong>Проверка</strong></div></div>}
       {(!isNew || wizardStep !== 3) && <div className="form-grid">
@@ -582,8 +600,9 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <CustomFieldsEditor fields={draft.customFields} error={errors.customFields} onChange={(value) => update("customFields", value)} />
         <FactSourcesEditor sources={draft.factSources} error={errors.factSources} onChange={(value) => update("factSources", value)} />
         <TimelineEditor events={draft.timelineEvents} error={errors.timelineEvents} onChange={(value) => update("timelineEvents", value)} />
-        </>}
+       </>}
       </div>}
+      {isNew && wizardStep === 1 && firstPerson && <div className="wizard-first-person-note" role="status"><strong>Это первая запись в дереве</strong><small>Добавьте её без связи — после сохранения можно будет добавлять родителей, детей и других родственников.</small></div>}
       {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{displayUnknown ? "Неизвестный человек" : personDisplayName(draft)}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь и семейная ситуация</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
       <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button>{isNew && wizardStep > 1 && <button type="button" className="button button-secondary" onClick={handleBack}>Назад</button>}{isNew && wizardStep < 3 && <button type="button" className="button button-primary save-button" onClick={handleNext} disabled={wizardStep === 1 && Boolean(relationshipMode) && !connectionTargetId}>{wizardStep === 1 ? "К сведениям" : "К проверке"}</button>}{isNew && wizardStep === 3 && <button type="button" className="button button-secondary add-another-button" onClick={() => handleSave(true)}><UserPlus size={17} /> Сохранить и добавить ещё одного</button>}{(!isNew || wizardStep === 3) && <button type="button" className="button button-primary save-button" onClick={() => handleSave(false)}><FloppyDisk size={18} weight="bold" /> {isNew ? "Добавить человека" : "Сохранить"}</button>}</div>
     </div>

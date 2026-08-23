@@ -22,6 +22,14 @@ test("repeated add keeps the selected relation target for multiple relatives or 
   assert.match(appSource, /setPartnershipType\(partnershipType\)/);
 });
 
+test("first person can be added without an unavailable relation target", () => {
+  assert.match(appSource, /const firstPerson = isNew && targetOptions\.length === 0/);
+  assert.match(appSource, /if \(firstPerson && value\) return/);
+  assert.match(appSource, /Это первая запись в дереве/);
+  assert.match(stylesSource, /\.editor-empty-tree \.wizard-relation-choice:not\(:first-child\)/);
+  assert.match(stylesSource, /\.editor-empty-tree \.nested-field, \.editor-empty-tree \.field-hint/);
+});
+
 test("family situation markers survive project serialization and reopening", () => {
   const people = [{
     id: "child",

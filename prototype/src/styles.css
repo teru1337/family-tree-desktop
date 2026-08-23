@@ -281,3 +281,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .timeline-event-copy p { margin: 2px 0 0; color: #5e5a52; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .timeline-event-copy em { color: #6d8751; font-style: normal; }
 @media (max-width: 430px) { .fact-source-row { grid-template-columns: 1fr 32px; }.fact-source-row input { grid-column: 1 / -1; grid-row: 2; }.timeline-event-editor-grid { grid-template-columns: 1fr; }.timeline-event-editor-grid .field-full { grid-column: auto; }.timeline-event-heading { display: grid; gap: 2px; } }
+
+.editor-empty-tree .wizard-relation-choice:not(:first-child) { pointer-events: none; opacity: .46; cursor: not-allowed; }
+.editor-empty-tree .nested-field, .editor-empty-tree .field-hint { display: none; }
+.wizard-first-person-note { display: grid; gap: 4px; margin-top: -2px; padding: 11px 12px; border: 1px solid #d9e3d1; border-radius: 7px; background: #f7fbf4; color: #4e5947; }
+.wizard-first-person-note strong { font-size: 12px; }
+.wizard-first-person-note small { color: #858178; font-size: 11px; line-height: 1.35; }
