@@ -57,6 +57,7 @@ import { calculateRelationship, personLabel } from "./relationship-calculator.js
 import { explainUserError } from "./ui-feedback.js";
 import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
 import { getSiblingComponent, orderGenerationMembers, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
+import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_FIELD_LABEL, MAX_CUSTOM_FIELD_VALUE, formatCardFieldLines, normalizeCustomFields, sanitizeCardFields, validateCustomFields } from "./person-fields.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -72,8 +73,8 @@ import {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
-const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true };
+const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
 
@@ -117,6 +118,7 @@ function validatePersonDraft(draft, { isNew = false, relationshipMode = "", conn
   const occupation = String(draft?.occupation || "").trim();
   const biography = String(draft?.biography || "").trim();
   const source = String(draft?.source || "").trim();
+  const customFields = Array.isArray(draft?.customFields) ? draft.customFields : [];
   const personNamePattern = /^[\p{L}\s.'’\-–—()]+$/u;
   const placePattern = /^[\p{L}\p{N}\s.,'’\-–—()\/$№]+$/u;
   const occupationPattern = /^[\p{L}\p{N}\s.,'’\-–—()/$№]+$/u;
@@ -128,6 +130,8 @@ function validatePersonDraft(draft, { isNew = false, relationshipMode = "", conn
   if (occupation && (!occupationPattern.test(occupation) || occupation.length > 100)) errors.occupation = "Профессия содержит недопустимые символы или слишком длинная.";
   if (biography.length > 2000 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(biography)) errors.biography = "Биография слишком длинная или содержит недопустимые символы.";
   if (source.length > 300 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(source)) errors.source = "Источник слишком длинный или содержит недопустимые символы; максимум 300 знаков.";
+  const customFieldsError = validateCustomFields(customFields);
+  if (customFieldsError) errors.customFields = customFieldsError;
   if (isNew && relationshipMode && !connectionTargetId) errors.connectionTargetId = "Выберите человека, с которым нужно установить связь.";
   return errors;
 }
@@ -232,13 +236,14 @@ function PersonAvatar({ person, large = false, showPhoto = true }) {
   return showPhoto && person?.image ? <img className={`person-avatar ${large ? "person-avatar-large" : ""}`} src={person.image} alt="" /> : <span className={`person-avatar person-avatar-empty ${large ? "person-avatar-large" : ""}`}><User size={large ? 32 : 20} weight="regular" /></span>;
 }
 
-function TreeNode({ person, position, selected, onSelect, showPhotos, dragging, onDragStart, onDragMove, onDragEnd }) {
+function TreeNode({ person, position, selected, onSelect, showPhotos, cardFields, dragging, onDragStart, onDragMove, onDragEnd }) {
+  const cardLines = formatCardFieldLines(person, cardFields);
   return (
-    <button className={`tree-node ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${personDisplayName(person)}${person.year ? ` ${person.year}` : ""}`}>
+    <button className={`tree-node ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${personDisplayName(person)}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
       <PersonAvatar person={person} showPhoto={showPhotos} />
       <span className="tree-node-copy">
         {(person.isUnknown ? personDisplayName(person) : (person.shortName || person.name || personDisplayName(person))).split("\n").map((line) => <span key={line} className="tree-node-name">{line}</span>)}
-        <span className="tree-node-year">{person.year || "дата неизвестна"}</span>
+        <span className="tree-node-details">{cardLines.map((line, index) => <span key={`${person.id}-card-line-${index}`} className={index === 0 && sanitizeCardFields(cardFields).includes("year") ? "tree-node-year" : "tree-node-detail"}>{line}</span>)}</span>
       </span>
     </button>
   );
@@ -373,6 +378,26 @@ function RelationshipCalculatorModal({ people, partnerships, initialSourceId, on
   );
 }
 
+function CustomFieldsEditor({ fields, error, onChange }) {
+  const safeFields = Array.isArray(fields) ? fields : [];
+  const updateField = (index, field, value) => onChange(safeFields.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
+  const removeField = (index) => onChange(safeFields.filter((_, itemIndex) => itemIndex !== index));
+  const addField = () => {
+    if (safeFields.length >= MAX_CUSTOM_FIELDS) return;
+    onChange([...safeFields, { id: `custom-draft-${safeFields.length + 1}`, label: "", value: "" }]);
+  };
+  return <div className={`field field-full custom-fields-editor ${error ? "has-error" : ""}`}>
+    <div className="custom-fields-heading"><span>Дополнительные поля <em>необязательно</em></span><small>Например: звание, семейное прозвище, награда или важное событие.</small></div>
+    {safeFields.length > 0 && <div className="custom-field-list">{safeFields.map((item, index) => <div className="custom-field-row" key={item.id || index}>
+      <input value={item.label || ""} maxLength={MAX_CUSTOM_FIELD_LABEL} onChange={(event) => updateField(index, "label", event.target.value)} placeholder="Название" aria-label={`Название поля ${index + 1}`} />
+      <input value={item.value || ""} maxLength={MAX_CUSTOM_FIELD_VALUE} onChange={(event) => updateField(index, "value", event.target.value)} placeholder="Значение" aria-label={`Значение поля ${index + 1}`} />
+      <button type="button" className="icon-button custom-field-remove" onClick={() => removeField(index)} aria-label={`Удалить поле ${index + 1}`} title="Удалить поле"><Trash size={16} /></button>
+    </div>)}</div>}
+    <button type="button" className="custom-field-add" onClick={addField} disabled={safeFields.length >= MAX_CUSTOM_FIELDS}><Plus size={16} /> Добавить поле{safeFields.length >= MAX_CUSTOM_FIELDS ? ` (максимум ${MAX_CUSTOM_FIELDS})` : ""}</button>
+    {error && <small className="field-error">{error}</small>}
+  </div>;
+}
+
 function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partnershipType, connectionTargetId, unknownParent, singleKnownParent, outOfMarriage, siblingWithoutParents, people, onChange, onRelationChange, onRelationshipTypeChange, onPartnershipTypeChange, onConnectionTargetChange, onUnknownParentChange, onSingleKnownParentChange, onOutOfMarriageChange, onSiblingWithoutParentsChange, onSave, onCancel }) {
   const [errors, setErrors] = useState({});
   const [wizardStep, setWizardStep] = useState(isNew ? 1 : 2);
@@ -474,6 +499,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <label className={`field field-full ${errors.biography ? "has-error" : ""}`}><span>Краткая биография <em>необязательно</em></span><textarea value={draft.biography} onChange={(event) => update("biography", event.target.value)} placeholder="Важные события, интересы, воспоминания..." rows="5" aria-invalid={Boolean(errors.biography)} />{errors.biography && <small className="field-error">{errors.biography}</small>}</label>
         <label className={`field ${errors.source ? "has-error" : ""}`}><span>Источник сведений <em>необязательно</em></span><input value={draft.source || ""} onChange={(event) => update("source", event.target.value)} placeholder="Например, рассказала мама" aria-invalid={Boolean(errors.source)} />{errors.source && <small className="field-error">{errors.source}</small>}</label>
         <label className="field"><span>Достоверность</span><select value={draft.confidence || "unknown"} onChange={(event) => update("confidence", event.target.value)}>{PERSON_CONFIDENCE_LEVELS.map((level) => <option key={level} value={level}>{confidenceLabel[level]}</option>)}</select></label>
+        <CustomFieldsEditor fields={draft.customFields} error={errors.customFields} onChange={(value) => update("customFields", value)} />
         </>}
       </div>}
       {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{displayUnknown ? "Неизвестный человек" : personDisplayName(draft)}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь и семейная ситуация</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
@@ -606,7 +632,7 @@ function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewp
   return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{people.map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
 }
 
-function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected }) {
+function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected }) {
   const dragRef = useRef(null);
   const personDragRef = useRef(null);
   const viewportRef = useRef(null);
@@ -771,7 +797,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
@@ -968,24 +994,34 @@ function ArchiveModal({ payload, importState, onClose, onDownload, onImport, onR
   );
 }
 
-function ViewSettingsModal({ treeStyle, showPhotos, onTreeStyleChange, onShowPhotosChange, onClose }) {
+function CardFieldsPicker({ cardFields, onChange }) {
+  const selected = sanitizeCardFields(cardFields);
+  const toggle = (value) => {
+    if (selected.includes(value) && selected.length === 1) return;
+    onChange(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+  };
+  return <div className="view-setting-group card-fields-picker"><div><span className="field-label">Поля на карточках</span><small className="field-hint">Выберите, что показывать под именем. Дата остаётся всегда, чтобы карточка не теряла главный ориентир.</small></div><div className="card-field-choice-list">{CARD_FIELD_OPTIONS.map((option) => <label className={`card-field-choice ${selected.includes(option.value) ? "selected" : ""}`} key={option.value}><input type="checkbox" checked={selected.includes(option.value)} disabled={selected.includes(option.value) && selected.length === 1} onChange={() => toggle(option.value)} /><span><strong>{option.label}</strong><small>{option.description}</small></span></label>)}</div></div>;
+}
+
+function ViewSettingsModal({ treeStyle, showPhotos, cardFields, onTreeStyleChange, onShowPhotosChange, onCardFieldsChange, onClose }) {
   const styles = [{ value: "classic", title: "Классический", description: "Чёткие карточки и спокойные линии" }, { value: "album", title: "Семейный альбом", description: "Тёплая бумажная палитра и цветные фото" }, { value: "minimal", title: "Сдержанный", description: "Больше воздуха и меньше декоративных деталей" }];
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
       <section className="backup-modal view-settings-modal" role="dialog" aria-modal="true" aria-labelledby="view-settings-title" onClick={(event) => event.stopPropagation()}>
         <div className="backup-modal-header"><div><span className="eyebrow">Визуализация дерева</span><h2 id="view-settings-title">Настроить вид</h2><p>Выберите, как показывать семейные карточки на полотне.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть настройки вида"><X size={21} /></button></div>
-        <div className="view-settings-body"><label className="view-toggle"><input type="checkbox" checked={showPhotos} onChange={(event) => onShowPhotosChange(event.target.checked)} /><span><strong>Показывать фотографии</strong><small>Фото будут видны на карточках людей и в дереве.</small></span></label><div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${treeStyle === style.value ? "selected" : ""}`} onClick={() => onTreeStyleChange(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div></div>
+        <div className="view-settings-body"><label className="view-toggle"><input type="checkbox" checked={showPhotos} onChange={(event) => onShowPhotosChange(event.target.checked)} /><span><strong>Показывать фотографии</strong><small>Фото будут видны на карточках людей и в дереве.</small></span></label><div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${treeStyle === style.value ? "selected" : ""}`} onClick={() => onTreeStyleChange(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div><CardFieldsPicker cardFields={cardFields} onChange={onCardFieldsChange} /></div>
         <div className="view-settings-footer"><button type="button" className="button button-primary" onClick={onClose}>Готово</button></div>
       </section>
     </div>
   );
 }
 
-function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, onSave, onClose }) {
+function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, cardFields, onSave, onClose }) {
   const [title, setTitle] = useState(projectMeta.title || "Моё семейное древо");
   const [autoSave, setAutoSave] = useState(autoSaveEnabled);
   const [nextTreeStyle, setNextTreeStyle] = useState(treeStyle);
   const [nextShowPhotos, setNextShowPhotos] = useState(showPhotos);
+  const [nextCardFields, setNextCardFields] = useState(sanitizeCardFields(cardFields));
   const [error, setError] = useState("");
   const styles = [{ value: "classic", title: "Классический", description: "Чёткие карточки и спокойные линии" }, { value: "album", title: "Семейный альбом", description: "Тёплая бумажная палитра и цветные фото" }, { value: "minimal", title: "Сдержанный", description: "Больше воздуха и меньше декоративных деталей" }];
   const save = () => {
@@ -998,7 +1034,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
       setError("Название проекта содержит недопустимые символы.");
       return;
     }
-    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos });
+    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, cardFields: nextCardFields });
   };
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
@@ -1008,6 +1044,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
           <label className={`field settings-title-field ${error ? "has-error" : ""}`}><span>Название проекта</span><input value={title} onChange={(event) => { setTitle(event.target.value); setError(""); }} placeholder="Например, Семья Петровых" aria-invalid={Boolean(error)} />{error && <small className="field-error">{error}</small>}</label>
           <label className="view-toggle"><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /><span><strong>Автоматически сохранять изменения</strong><small>Локальная копия и резервная копия создаются после изменений.</small></span></label>
           <label className="view-toggle"><input type="checkbox" checked={nextShowPhotos} onChange={(event) => setNextShowPhotos(event.target.checked)} /><span><strong>Показывать фотографии</strong><small>Фото будут видны на карточках людей и в дереве.</small></span></label>
+          <CardFieldsPicker cardFields={nextCardFields} onChange={setNextCardFields} />
           <div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${nextTreeStyle === style.value ? "selected" : ""}`} onClick={() => setNextTreeStyle(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div>
         </div>
         <div className="view-settings-footer"><button type="button" className="button button-ghost" onClick={onClose}>Отмена</button><button type="button" className="button button-primary" onClick={save}>Сохранить настройки</button></div>
@@ -1016,7 +1053,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
   );
 }
 
-function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, showPhotos, onClose, onToast }) {
+function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, showPhotos, cardFields, onClose, onToast }) {
   const [format, setFormat] = useState(initialFormat);
   const [quality, setQuality] = useState(initialFormat === "print" ? "print" : "print");
   const [pdfMode, setPdfMode] = useState(initialFormat === "print" ? "tiles" : "poster");
@@ -1035,8 +1072,9 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
   const layoutOptions = useMemo(() => {
     const cardOptions = { compact: { cardWidth: 190, cardHeight: 92 }, standard: { cardWidth: 220, cardHeight: 102 }, large: { cardWidth: 250, cardHeight: 114 } };
     const spacingOptions = { compact: { columnStep: 280, rowStep: 230, horizontalPadding: 260, verticalPadding: 180 }, comfortable: { columnStep: 350, rowStep: 280, horizontalPadding: 300, verticalPadding: 210 }, spacious: { columnStep: 430, rowStep: 340, horizontalPadding: 340, verticalPadding: 240 } };
-    return { ...cardOptions[cardSize], ...spacingOptions[spacing] };
-  }, [cardSize, spacing]);
+    const base = cardOptions[cardSize];
+    return { ...base, cardHeight: base.cardHeight + Math.max(0, sanitizeCardFields(cardFields).length - 1) * 14, ...spacingOptions[spacing] };
+  }, [cardSize, spacing, cardFields]);
   const layout = useMemo(() => buildTreeLayout(people, partnerships, layoutOptions), [people, partnerships, layoutOptions]);
   const qualityInfo = EXPORT_QUALITY[quality] || EXPORT_QUALITY.print;
   const fontScaleValue = fontScale === "large" ? 1.2 : fontScale === "extra-large" ? 1.35 : 1;
@@ -1068,7 +1106,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
     let cancelled = false;
     let objectUrl = "";
     const timer = window.setTimeout(() => {
-      buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, fontScale: fontScaleValue, connectionGap })
+      buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScale: fontScaleValue, connectionGap })
         .then((svg) => {
           if (cancelled) return;
           objectUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
@@ -1090,14 +1128,14 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
       window.clearTimeout(timer);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [people, partnerships, layout, treeStyle, showPhotos, fontScaleValue, connectionGap, previewAttempt]);
+  }, [people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScaleValue, connectionGap, previewAttempt]);
 
   const runExport = async () => {
     setBusy(true);
     setExportProgress("Подготавливаю файл…");
     const baseName = `семейное-древо-${new Date().toISOString().slice(0, 10)}`;
     const createExportInMainThread = async () => {
-      const rendered = await renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap });
+      const rendered = await renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap });
       if (format === "png") return { blob: await canvasToBlob(rendered.canvas, "image/png"), fileName: `${baseName}.png`, message: "PNG-файл подготовлен" };
       if (format === "tiff") return { blob: canvasToTiff(rendered.canvas), fileName: `${baseName}.tiff`, message: "TIFF-файл подготовлен" };
       const pdf = await buildPdfFromCanvas(rendered.canvas, { mode: exportMode, paper, orientation, posterPlan });
@@ -1106,7 +1144,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
     try {
       let result;
       try {
-        result = await runBackgroundExport({ people, partnerships, layout, treeStyle, showPhotos, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap, format: format === "print" ? "pdf" : format, mode: exportMode, paper, orientation, posterPlan }, { onProgress: ({ label }) => setExportProgress(label) });
+        result = await runBackgroundExport({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap, format: format === "print" ? "pdf" : format, mode: exportMode, paper, orientation, posterPlan }, { onProgress: ({ label }) => setExportProgress(label) });
       } catch (error) {
         if (!error.isBackgroundExportError) throw error;
         setExportProgress("Фоновый режим недоступен, готовлю файл…");
@@ -1148,7 +1186,7 @@ export function App() {
   const sessionPeople = loadedSession ? loadedSession.people : initialPeople;
   const sessionPartnerships = loadedSession ? (loadedSession.partnerships || []) : initialPartnerships;
   const sessionProject = loadedSession?.project || { id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree" };
-  const sessionSettings = { ...defaultProjectSettings, ...(sessionProject.settings || {}) };
+  const sessionSettings = { ...defaultProjectSettings, ...(sessionProject.settings || {}), cardFields: sanitizeCardFields(sessionProject.settings?.cardFields) };
   const [people, setPeople] = useState(sessionPeople);
   const [partnerships, setPartnerships] = useState(sessionPartnerships);
   const [projectMeta, setProjectMeta] = useState({ ...sessionProject, settings: sessionSettings });
@@ -1173,6 +1211,7 @@ export function App() {
   const [keyboardPanRequest, setKeyboardPanRequest] = useState(null);
   const [treeStyle, setTreeStyle] = useState(sessionSettings.treeStyle || "classic");
   const [showPhotos, setShowPhotos] = useState(sessionSettings.showPhotos !== false);
+  const [cardFields, setCardFields] = useState(sessionSettings.cardFields);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(sessionSettings.autoSave !== false);
   const [editing, setEditing] = useState(false);
   const [editorSessionKey, setEditorSessionKey] = useState(0);
@@ -1217,7 +1256,7 @@ export function App() {
   const inspectorResizeRef = useRef(null);
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
   if (!historyRef.current) historyRef.current = createHistory(createSnapshot(people, partnerships, projectMeta));
-  const treeLayout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
+  const treeLayout = useMemo(() => buildTreeLayout(people, partnerships, { cardHeight: 92 + Math.max(0, sanitizeCardFields(cardFields).length - 1) * 14 }), [people, partnerships, cardFields]);
   const deferredQuery = useDeferredValue(query);
   const hasActiveSearch = query.trim() || searchFilters.generation !== "all" || searchFilters.relation !== "all" || searchFilters.yearFrom || searchFilters.yearTo || searchFilters.place.trim();
   const searchResults = useMemo(() => filterPeople(people, partnerships, treeLayout.positions, deferredQuery, searchFilters), [people, partnerships, deferredQuery, searchFilters, treeLayout.positions]);
@@ -1228,6 +1267,7 @@ export function App() {
     const settings = { ...defaultProjectSettings, ...(snapshot.projectMeta.settings || {}) };
     setTreeStyle(settings.treeStyle || "classic");
     setShowPhotos(settings.showPhotos !== false);
+    setCardFields(sanitizeCardFields(settings.cardFields));
     setAutoSaveEnabled(settings.autoSave !== false);
     setSelectedId((current) => snapshot.people.some((person) => person.id === current) ? current : snapshot.people[0]?.id || "");
   };
@@ -1256,14 +1296,17 @@ export function App() {
     setHistoryStatus(getHistoryStatus(nextHistory));
   };
   const updateViewSetting = (field, value) => {
-    setProjectMeta((current) => ({ ...current, settings: { ...defaultProjectSettings, ...(current.settings || {}), [field]: value } }));
+    const nextValue = field === "cardFields" ? sanitizeCardFields(value) : value;
+    setProjectMeta((current) => ({ ...current, settings: { ...defaultProjectSettings, ...(current.settings || {}), [field]: nextValue } }));
     if (field === "treeStyle") setTreeStyle(value);
     if (field === "showPhotos") setShowPhotos(value);
+    if (field === "cardFields") setCardFields(nextValue);
     setDirty(true);
   };
-  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos }) => {
+  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, cardFields: nextCardFields }) => {
     const nextTitle = String(title || "").trim() || "Моё семейное древо";
-    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos } };
+    const normalizedCardFields = sanitizeCardFields(nextCardFields);
+    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, cardFields: normalizedCardFields } };
     const payload = createProjectPayload(people, nextMeta, partnerships);
     try {
       writeWorkingCopy(payload);
@@ -1271,6 +1314,7 @@ export function App() {
       setAutoSaveEnabled(autoSave);
       setTreeStyle(nextTreeStyle);
       setShowPhotos(nextShowPhotos);
+      setCardFields(normalizedCardFields);
       setLastSavedAt(payload.manifest.updatedAt);
       setDirty(false);
       closeSettings();
@@ -1583,7 +1627,7 @@ export function App() {
     ])];
     const normalizedName = isUnknownRecord ? "" : draft.name.trim() || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
-    const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
+    const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
     if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedId(personToSave.id); setToast("Изменения сохранены"); } else {
       const newId = makeId(); const newPerson = { ...personToSave, id: newId };
       const relationTarget = people.find((person) => person.id === connectionTargetId);
@@ -1780,6 +1824,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
+      setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
       setSelectedId(restoredPayload.people.find((person) => person.id === "ivan")?.id || restoredPayload.people[0]?.id || "");
       resetHistory(restoredPayload.people, restoredPayload.partnerships || [], nextProjectMeta);
@@ -1826,6 +1871,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setTreeStyle(loadedSettings.treeStyle || "classic");
       setShowPhotos(loadedSettings.showPhotos !== false);
+      setCardFields(sanitizeCardFields(loadedSettings.cardFields));
       setAutoSaveEnabled(loadedSettings.autoSave !== false);
       setSelectedId(loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "");
       setEditing(false);
@@ -1851,6 +1897,7 @@ export function App() {
       setProjectMeta({ ...payload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" });
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
+      setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
       setSelectedId(payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "");
       setEditing(false);
@@ -1933,7 +1980,7 @@ export function App() {
     }
     setPeople([]);
     setPartnerships([]);
-    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos } });
+    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, cardFields: [...cardFields] } });
     setSelectedId("");
     setPan({ x: 0, y: 0 });
     setZoom(1);
@@ -1985,7 +2032,7 @@ export function App() {
          </div>
        </header>
        <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}>
-         <TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека")} />
+         <TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека")} />
          <aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}>
            <div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} />
            <div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>
@@ -1997,11 +2044,11 @@ export function App() {
        {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
        {backupOpen && <BackupModal backups={backups} projectMeta={projectMeta} lastSavedAt={lastSavedAt} lastBackupAt={lastBackupAt} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
        {archiveOpen && <ArchiveModal payload={buildPayload()} importState={archiveImport} onClose={() => { setArchiveOpen(false); setArchiveImport(null); }} onDownload={saveFamilyArchive} onImport={handleArchiveSelected} onRestoreImport={restoreFamilyArchive} onClearImport={() => setArchiveImport(null)} />}
-       {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onClose={() => setViewSettingsOpen(false)} />}
+       {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onCardFieldsChange={(value) => updateViewSetting("cardFields", value)} onClose={() => setViewSettingsOpen(false)} />}
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
-       {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
+       {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
        {relationshipCalculatorOpen && <RelationshipCalculatorModal people={people} partnerships={partnerships} initialSourceId={selectedId} onClose={() => setRelationshipCalculatorOpen(false)} onSelectPerson={selectPerson} onShowOnMap={focusPersonOnMap} />}
-       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} onSave={saveProjectSettings} onClose={closeSettings} />}
+       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
        {relationshipDeleteConfirm && <ConfirmModal title="Удалить связь?" description={`${relationshipDeleteConfirm.label}. Связь будет убрана из дерева, а перед этим будет создана резервная копия. После удаления можно сразу отменить действие.`} confirmLabel="Удалить связь" onClose={() => setRelationshipDeleteConfirm(null)} onConfirm={deleteRelationship} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}

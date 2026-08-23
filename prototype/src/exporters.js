@@ -1,3 +1,5 @@
+import { formatCardFieldLines } from "./person-fields.js";
+
 export const EXPORT_QUALITY = {
   screen: { label: "Экран", scale: 1, description: "быстрый файл для просмотра" },
   print: { label: "Печать", scale: 2, description: "чёткое изображение для принтера" },
@@ -114,7 +116,7 @@ function edgePath(from, to, connectionGap = 24) {
   return `M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`;
 }
 
-export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true, fontScale = 1, connectionGap = 24 }) {
+export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true, cardFields = ["year"], fontScale = 1, connectionGap = 24 }) {
   const theme = THEMES[treeStyle] || THEMES.classic;
   const safeFontScale = Math.max(0.8, Number(fontScale) || 1);
   const safeConnectionGap = Math.max(18, Number(connectionGap) || 24);
@@ -162,13 +164,15 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
     const position = layout.positions[person.id];
     if (!position) return "";
     const names = formatPersonName(person);
+    const cardLines = formatCardFieldLines(person, cardFields);
     const photo = showPhotos ? imageMap.get(person.image) : null;
     const imageMarkup = photo
       ? `<image href="${escapeXml(photo)}" x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" preserveAspectRatio="xMidYMid slice" clip-path="url(#photo-clip-${escapeXml(person.id)})" />`
       : `<circle cx="${position.left + 37}" cy="${position.top + 45}" r="22" fill="${theme.background}" stroke="${theme.border}" /><text x="${position.left + 37}" y="${position.top + 50}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="${theme.accent}">?</text>`;
     const nameMarkup = names.map((name, index) => `<text x="${position.left + 74}" y="${position.top + 34 + index * 17 * safeFontScale}" font-family="Segoe UI, Arial, sans-serif" font-size="${13 * safeFontScale}" font-weight="600" fill="#293241">${escapeXml(name)}</text>`).join("");
-    const year = person.year || "дата неизвестна";
-    return `<g data-person-id="${escapeXml(person.id)}"><rect x="${position.left}" y="${position.top}" width="${position.width}" height="${position.height}" rx="9" fill="${theme.card}" stroke="${theme.border}" stroke-width="1.5" /><rect x="${position.left + 1}" y="${position.top + 1}" width="5" height="${position.height - 2}" rx="4" fill="${theme.accent}" opacity="0.8" /><clipPath id="photo-clip-${escapeXml(person.id)}"><rect x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" rx="7" /></clipPath>${imageMarkup}${nameMarkup}<text x="${position.left + 74}" y="${position.top + position.height - 23}" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(truncate(year, 22))}</text></g>`;
+    const detailsStartY = position.top + position.height - 14 - Math.max(0, cardLines.length - 1) * 13 * safeFontScale;
+    const detailsMarkup = cardLines.map((line, index) => `<text x="${position.left + 74}" y="${detailsStartY + index * 13 * safeFontScale}" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(truncate(line, 28))}</text>`).join("");
+    return `<g data-person-id="${escapeXml(person.id)}"><rect x="${position.left}" y="${position.top}" width="${position.width}" height="${position.height}" rx="9" fill="${theme.card}" stroke="${theme.border}" stroke-width="1.5" /><rect x="${position.left + 1}" y="${position.top + 1}" width="5" height="${position.height - 2}" rx="4" fill="${theme.accent}" opacity="0.8" /><clipPath id="photo-clip-${escapeXml(person.id)}"><rect x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" rx="7" /></clipPath>${imageMarkup}${nameMarkup}${detailsMarkup}</g>`;
   }).join("");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}"><rect width="100%" height="100%" fill="${theme.background}" /><path d="M 0 66 H ${layout.width}" stroke="${theme.border}" stroke-width="1" opacity="0.65" />${generationMarkup}<g>${connectionMarkup}${partnershipMarkup}</g>${nodeMarkup}</svg>`;
@@ -183,8 +187,8 @@ function loadSvgImage(svg) {
   });
 }
 
-export async function renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, scale = 1, fontScale = 1, connectionGap = 24 }) {
-  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, fontScale, connectionGap });
+export async function renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, cardFields = ["year"], scale = 1, fontScale = 1, connectionGap = 24 }) {
+  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScale, connectionGap });
   const image = await loadSvgImage(svg);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(layout.width * scale));

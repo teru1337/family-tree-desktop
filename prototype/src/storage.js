@@ -1,5 +1,6 @@
 import { normalizePersonDate, validateDateRecord } from "./dates.js";
 import { inspectFamilyData } from "./data-quality.js";
+import { normalizeCustomFields } from "./person-fields.js";
 
 export const PROJECT_FORMAT = "familytree";
 export const PROJECT_VERSION = 6;
@@ -41,6 +42,7 @@ function normalizePersonMetadata(person) {
     source: typeof person?.source === "string" ? person.source.trim() : "",
     confidence: PERSON_CONFIDENCE_LEVELS.includes(person?.confidence) ? person.confidence : "unknown",
     siblingOrder: Number.isInteger(siblingOrderNumber) && siblingOrderNumber > 0 && siblingOrderNumber <= 999 ? siblingOrderNumber : null,
+    customFields: normalizeCustomFields(person?.customFields),
   };
 }
 
@@ -397,6 +399,7 @@ export function validateProject(raw) {
 
   raw.people.forEach((person) => {
     const personId = String(person?.id || "человека");
+    if (person?.customFields !== undefined && !Array.isArray(person.customFields)) warnings.push(`Дополнительные поля записи ${personId} указаны не списком и будут сброшены.`);
     if (person?.siblingOrder !== undefined && person?.siblingOrder !== null && person?.siblingOrder !== "") {
       const siblingOrder = Number(person.siblingOrder);
       if (!Number.isInteger(siblingOrder) || siblingOrder < 1 || siblingOrder > 999) warnings.push(`Порядок записи ${personId} среди братьев и сестёр указан неправильно и будет сброшен.`);
