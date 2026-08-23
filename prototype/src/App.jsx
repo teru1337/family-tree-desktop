@@ -49,6 +49,7 @@ import {
   EXPORT_QUALITY,
   PAPER_SIZES,
   buildPdfFromCanvas,
+  buildTreeSvg,
   canvasToBlob,
   canvasToTiff,
   downloadBlob,
@@ -730,6 +731,10 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
   const [paper, setPaper] = useState("a4");
   const [orientation, setOrientation] = useState("landscape");
   const [busy, setBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewBusy, setPreviewBusy] = useState(true);
+  const [previewError, setPreviewError] = useState("");
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const layout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
   const qualityInfo = EXPORT_QUALITY[quality] || EXPORT_QUALITY.print;
   const pixelWidth = Math.round(layout.width * qualityInfo.scale);
@@ -738,12 +743,48 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
   const pageWidth = orientation === "landscape" ? tileSize.height : tileSize.width;
   const pageHeight = orientation === "landscape" ? tileSize.width : tileSize.height;
   const pageCount = pdfMode === "poster" && format === "pdf" ? 1 : Math.ceil(pixelWidth / (pageWidth * 2)) * Math.ceil(pixelHeight / (pageHeight * 2));
+  const exportMode = format === "print" ? "tiles" : pdfMode;
+  const previewCaption = format === "pdf" && pdfMode === "poster"
+    ? "Предпросмотр большого плаката"
+    : format === "png"
+      ? "Предпросмотр изображения PNG"
+      : format === "tiff"
+        ? "Предпросмотр изображения TIFF"
+        : "Предпросмотр разметки по листам";
   const formatOptions = [
     { value: "pdf", title: "PDF", description: "плакат или листы" },
     { value: "png", title: "PNG", description: "изображение для альбома" },
     { value: "tiff", title: "TIFF", description: "для типографии" },
     { value: "print", title: "Печать по листам", description: "многостраничный PDF" },
   ];
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    const timer = window.setTimeout(() => {
+      buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos })
+        .then((svg) => {
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+          setPreviewUrl(objectUrl);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setPreviewError(error.message || "Не удалось подготовить предпросмотр");
+        })
+        .finally(() => {
+          if (!cancelled) setPreviewBusy(false);
+        });
+    }, 0);
+    setPreviewUrl("");
+    setPreviewBusy(true);
+    setPreviewError("");
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [people, partnerships, layout, treeStyle, showPhotos, previewAttempt]);
 
   const runExport = async () => {
     setBusy(true);
@@ -757,11 +798,10 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
         downloadBlob(canvasToTiff(rendered.canvas), `${baseName}.tiff`);
         onToast("TIFF-файл подготовлен");
       } else {
-        const mode = format === "print" ? "tiles" : pdfMode;
-        const pdf = await buildPdfFromCanvas(rendered.canvas, { mode, paper, orientation });
-        const suffix = mode === "poster" ? "плакат" : "печать";
+        const pdf = await buildPdfFromCanvas(rendered.canvas, { mode: exportMode, paper, orientation });
+        const suffix = exportMode === "poster" ? "плакат" : "печать";
         downloadBlob(pdf, `${baseName}-${suffix}.pdf`);
-        onToast(mode === "poster" ? "PDF-плакат подготовлен" : "PDF для печати подготовлен");
+        onToast(exportMode === "poster" ? "PDF-плакат подготовлен" : "PDF для печати подготовлен");
       }
       onClose();
     } catch (error) {
@@ -779,6 +819,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
           <div className="export-setting-group"><span className="field-label">Формат</span><div className="export-format-list">{formatOptions.map((option) => <button type="button" key={option.value} className={`export-choice ${format === option.value ? "selected" : ""}`} onClick={() => { setFormat(option.value); if (option.value === "print") setPdfMode("tiles"); }}><strong>{option.title}</strong><small>{option.description}</small></button>)}</div></div>
           <div className="export-setting-group"><span className="field-label">Качество изображения</span><div className="export-quality-list">{Object.entries(EXPORT_QUALITY).map(([value, info]) => <button type="button" key={value} className={`export-choice export-quality-choice ${quality === value ? "selected" : ""}`} onClick={() => setQuality(value)}><strong>{info.label}</strong><small>{info.description}</small></button>)}</div></div>
           {(format === "pdf" || format === "print") && <div className="export-setting-group"><span className="field-label">Разметка страниц</span>{format === "pdf" && <div className="export-mode-list"><button type="button" className={`export-choice ${pdfMode === "poster" ? "selected" : ""}`} onClick={() => setPdfMode("poster")}><strong>Большой плакат</strong><small>Всё дерево на одном огромном листе</small></button><button type="button" className={`export-choice ${pdfMode === "tiles" ? "selected" : ""}`} onClick={() => setPdfMode("tiles")}><strong>Листы по страницам</strong><small>Разбить дерево на страницы для печати</small></button></div>}<div className="export-form-grid"><label className="field"><span>Размер листа</span><select value={paper} onChange={(event) => setPaper(event.target.value)}><option value="a4">A4</option><option value="a3">A3</option><option value="a2">A2</option></select></label><label className="field"><span>Ориентация</span><select value={orientation} onChange={(event) => setOrientation(event.target.value)}><option value="landscape">Альбомная</option><option value="portrait">Книжная</option></select></label></div></div>}
+          <div className="export-preview" aria-live="polite"><div className="export-preview-header"><div><span className="field-label">Предпросмотр</span><strong>{previewCaption}</strong></div><span className="export-preview-mode">{exportMode === "poster" ? "Одно полотно" : `${pageCount} ${pageCount === 1 ? "лист" : pageCount < 5 ? "листа" : "листов"}`}</span></div><div className={`export-preview-stage ${previewBusy ? "is-loading" : ""}`} aria-busy={previewBusy}>{previewBusy && <div className="export-preview-placeholder"><span className="preview-spinner" aria-hidden="true" /><strong>Готовлю предпросмотр…</strong><small>Компоновка дерева появится здесь</small></div>}{!previewBusy && previewError && <div className="export-preview-placeholder"><Info size={25} /><strong>Предпросмотр недоступен</strong><small>{previewError}</small><button type="button" className="button button-secondary preview-retry" onClick={() => setPreviewAttempt((attempt) => attempt + 1)}>Повторить</button></div>}{!previewBusy && !previewError && previewUrl && <img className="export-preview-image" src={previewUrl} alt={`Предпросмотр: ${previewCaption.toLowerCase()}`} />}</div><small className="export-preview-help">Показана вся компоновка дерева. Итоговый файл сохранится с выбранным качеством: {qualityInfo.label.toLowerCase()}.</small></div>
           <div className="export-summary"><div><strong>{pixelWidth.toLocaleString("ru-RU")} × {pixelHeight.toLocaleString("ru-RU")} пикселей</strong><span>Текущее дерево: {people.length} человек · {layout.generations.length} поколения</span></div>{(format === "pdf" || format === "print") && <span>{pdfMode === "poster" && format === "pdf" ? "1 лист-плакат" : `${pageCount} ${pageCount === 1 ? "лист" : pageCount < 5 ? "листа" : "листов"}`}</span>}</div>
           <div className="backup-note"><Info size={16} /> PNG подходит для семейного альбома, TIFF — для типографии, PDF — для домашней печати и большого плаката.</div>
         </div>
