@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-05-search.jpg" role="img" aria-label="Поиск человека по имени">
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
-    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
-  </defs>
-  <path class="line" d="M390 70V112H1100V194"/>
-  <path class="line" d="M1690 220H1500V318H1115"/>
-  <path class="line" d="M1690 420H1530V372H1115"/>
-  <g>
-    <rect x="274" y="10" width="232" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="290" y="35" class="label"><tspan x="290">1. Введите имя</tspan><tspan x="290" dy="20" class="note">Можно написать часть имени</tspan></text>
-    <rect x="1600" y="190" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="215" class="label"><tspan x="1614">2. Список совпадений</tspan><tspan x="1614" dy="20" class="note">Проверьте город</tspan></text>
-    <rect x="1600" y="390" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="415" class="label"><tspan x="1614">3. Выберите человека</tspan><tspan x="1614" dy="20" class="note">Откроется его панель</tspan></text>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-05-search.jpg" data-captured-from="electron-desktop" role="img" aria-label="Поиск человека и правая панель с подписями возможностей"><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker><style>.label{font:700 17px Arial,sans-serif;fill:#4e5947}.note{font:400 14.5px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style></defs><path class="line" d="M138 78V92H1121V124"/><path class="line" d="M390 78V104H1271V124"/><path class="line" d="M1560 44H1528V230H1257"/><path class="line" d="M1560 234H1540V410H1520"/><path class="line" d="M1560 866H1552V375H1520"/><g><rect x="18" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="32" y="35" class="label"><tspan x="32">1. Введите запрос</tspan><tspan x="32" dy="20" class="note">Можно искать по семейным сведениям</tspan></text></g><g><rect x="270" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="284" y="35" class="label"><tspan x="284">2. Фильтры</tspan><tspan x="284" dy="20" class="note">Поколение, даты, место и связи</tspan></text></g><g><rect x="1560" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="35" class="label"><tspan x="1574">3. Выберите результат</tspan><tspan x="1574" dy="20" class="note">Откройте карточку человека</tspan></text></g><g><rect x="1560" y="200" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="225" class="label"><tspan x="1574">4. Показать на карте</tspan><tspan x="1574" dy="20" class="note">Центрировать найденного человека</tspan></text></g><g><rect x="1560" y="832" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="857" class="label"><tspan x="1574">5. Соседи и история</tspan><tspan x="1574" dy="20" class="note">Перейти к семье или назад</tspan></text></g></svg>

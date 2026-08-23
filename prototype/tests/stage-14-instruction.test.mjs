@@ -21,8 +21,10 @@ const sourceNames = [
   "source-07-backups.jpg",
   "source-08-export-settings.jpg",
 ];
+const editableNames = assetNames.map((assetName) => assetName.replace(/\.svg$/, "-editable.svg"));
 const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const stylesSource = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+const captureScript = await readFile(new URL("../scripts/capture-instruction-screenshots.cjs", import.meta.url), "utf8");
 
 assert.match(appSource, /function InstructionModal/);
 assert.match(appSource, /const openInstruction/);
@@ -34,14 +36,18 @@ assert.match(stylesSource, /height:\s*min\(900px/);
 assert.match(stylesSource, /\.instruction-page\s*\{[^}]*minmax\(0, 2fr\)/);
 assert.match(appSource, /Открыть изображение крупно/);
 assert.match(stylesSource, /\.instruction-preview-stage\s*\{[^}]*width:\s*1800px[^}]*height:\s*1000px/);
+assert.match(captureScript, /show:\s*true/);
+assert.match(captureScript, /capturePage/);
+assert.match(captureScript, /outputViewport/);
 for (const assetName of assetNames) {
   const svg = await readFile(new URL(`../public/instruction/${assetName}`, import.meta.url), "utf8");
   assert.match(svg, /<svg[\s>]/);
   assert.match(svg, /marker-end/);
   assert.match(svg, /width="1800"/);
   assert.match(svg, /height="1000"/);
-  assert.match(svg, /\.label\{font:600 16px Arial/);
-  assert.match(svg, /\.note\{font:400 14px Arial/);
+  assert.match(svg, /data-captured-from="electron-desktop"/);
+  assert.match(svg, /\.label\{font:700 17px Arial/);
+  assert.match(svg, /\.note\{font:400 14\.5px Arial/);
   assert.ok((svg.match(/<text[^>]*class="label"/g) || []).length >= 2, `${assetName} has too few readable labels`);
   assert.ok(svg.length > 500, `${assetName} unexpectedly short`);
   assert.match(appSource, new RegExp(assetName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -53,5 +59,16 @@ for (const sourceName of sourceNames) {
 for (let index = 0; index < assetNames.length; index += 1) {
   const svg = await readFile(new URL(`../public/instruction/${assetNames[index]}`, import.meta.url), "utf8");
   assert.match(svg, new RegExp(sourceNames[index].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+}
+for (let index = 0; index < editableNames.length; index += 1) {
+  const svg = await readFile(new URL(`../public/instruction/editable/${editableNames[index]}`, import.meta.url), "utf8");
+  assert.match(svg, /id="source-screenshot"/);
+  assert.match(svg, /id="annotation-lines"/);
+  assert.match(svg, /id="annotation-labels"/);
+  assert.match(svg, /data-captured-from="electron-desktop"/);
+  assert.match(svg, /data:image\/jpeg;base64,/);
+  assert.match(svg, /внешних краёв элементов/);
+  assert.match(svg, new RegExp(sourceNames[index].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.ok(svg.length > 100000, `${editableNames[index]} embedded screenshot quality guard failed`);
 }
 console.log(`Stage 15 instruction screenshots and SVG overlays ok: ${assetNames.length} steps`);

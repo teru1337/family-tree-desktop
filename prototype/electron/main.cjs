@@ -10,6 +10,9 @@ const rendererRoot = path.resolve(__dirname, "..", "dist", "client");
 let mainWindow = null;
 let staticServer = null;
 let currentUpdateVersion = "";
+let downloadedUpdateVersion = "";
+let updateCheckPromise = null;
+let updateDownloadPromise = null;
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -115,22 +118,40 @@ function configureUpdater() {
   autoUpdater.on("checking-for-update", () => sendUpdateStatus("checking"));
   autoUpdater.on("update-available", (info) => {
     currentUpdateVersion = info.version;
+    downloadedUpdateVersion = "";
     sendUpdateStatus("available", {
       version: info.version,
       releaseDate: info.releaseDate || "",
     });
+    void downloadUpdateInBackground();
   });
   autoUpdater.on("update-not-available", () => sendUpdateStatus("not-available"));
   autoUpdater.on("download-progress", (progress) => sendUpdateStatus("downloading", {
     version: currentUpdateVersion,
     percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))),
   }));
-  autoUpdater.on("update-downloaded", (info) => sendUpdateStatus("downloaded", {
-    version: info.version,
-  }));
+  autoUpdater.on("update-downloaded", (info) => {
+    downloadedUpdateVersion = info.version;
+    updateDownloadPromise = null;
+    sendUpdateStatus("downloaded", { version: info.version });
+  });
   autoUpdater.on("error", (error) => sendUpdateStatus("error", {
     message: describeUpdateError(error),
   }));
+}
+
+async function downloadUpdateInBackground() {
+  if (downloadedUpdateVersion || updateDownloadPromise) return updateDownloadPromise;
+  updateDownloadPromise = autoUpdater.downloadUpdate()
+    .catch((error) => {
+      const message = describeUpdateError(error);
+      sendUpdateStatus("error", { message });
+      return null;
+    })
+    .finally(() => {
+      updateDownloadPromise = null;
+    });
+  return updateDownloadPromise;
 }
 
 async function checkForUpdates() {
@@ -138,17 +159,58 @@ async function checkForUpdates() {
     sendUpdateStatus("unsupported");
     return { state: "unsupported", currentVersion: app.getVersion() };
   }
+  if (updateCheckPromise) return updateCheckPromise;
+  updateCheckPromise = (async () => {
+    try {
+      await autoUpdater.checkForUpdates();
+      return { state: "checking", currentVersion: app.getVersion() };
+    } catch (error) {
+      const message = describeUpdateError(error);
+      sendUpdateStatus("error", { message });
+      return { state: "error", currentVersion: app.getVersion(), message };
+    } finally {
+      updateCheckPromise = null;
+    }
+  })();
+  return updateCheckPromise;
+}
+
+async function downloadUpdate() {
+  if (!app.isPackaged) {
+    sendUpdateStatus("unsupported");
+    return { state: "unsupported", currentVersion: app.getVersion() };
+  }
+  if (downloadedUpdateVersion) return { state: "downloaded", version: downloadedUpdateVersion, currentVersion: app.getVersion() };
+  if (!currentUpdateVersion) {
+    const message = "Сначала проверьте наличие новой версии.";
+    sendUpdateStatus("error", { message });
+    return { state: "error", currentVersion: app.getVersion(), message };
+  }
   try {
-    await autoUpdater.checkForUpdates();
-    return { state: "checking", currentVersion: app.getVersion() };
+    await downloadUpdateInBackground();
+    if (!downloadedUpdateVersion) {
+      const message = "Не удалось завершить загрузку обновления.";
+      return { state: "error", currentVersion: app.getVersion(), message };
+    }
+    return { state: "downloaded", version: downloadedUpdateVersion, currentVersion: app.getVersion() };
   } catch (error) {
     const message = describeUpdateError(error);
-    sendUpdateStatus("error", { message });
     return { state: "error", currentVersion: app.getVersion(), message };
   }
 }
 
+function installDownloadedUpdate() {
+  if (!downloadedUpdateVersion) {
+    const message = "Обновление ещё не загружено. Дождитесь завершения скачивания.";
+    sendUpdateStatus("error", { message });
+    return { state: "error", currentVersion: app.getVersion(), message };
+  }
+  autoUpdater.quitAndInstall(true, true);
+  return { state: "installing", version: downloadedUpdateVersion, currentVersion: app.getVersion() };
+}
+
 function createWindow(port) {
+  const appIconPath = getAppIconPath();
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -158,7 +220,7 @@ function createWindow(port) {
     backgroundColor: "#f7f5ee",
     autoHideMenuBar: true,
     title: "Семейное древо",
-    icon: getAppIconPath(),
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -167,6 +229,7 @@ function createWindow(port) {
     },
   });
 
+  if (process.platform === "win32") mainWindow.setIcon(appIconPath);
   mainWindow.maximize();
   mainWindow.removeMenu();
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -177,6 +240,8 @@ function createWindow(port) {
   });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
 }
+
+if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 
 const hasSingleInstance = app.requestSingleInstanceLock();
 if (!hasSingleInstance) {
@@ -189,7 +254,6 @@ if (!hasSingleInstance) {
   });
 
   app.whenReady().then(async () => {
-    app.setAppUserModelId(APP_ID);
     configureUpdater();
     staticServer = await startRendererServer();
     createWindow(staticServer.port);
@@ -223,14 +287,8 @@ if (!hasSingleInstance) {
     return { canceled: false, filePath };
   });
   ipcMain.handle("family-tree-update-check", () => checkForUpdates());
-  ipcMain.handle("family-tree-update-download", async () => {
-    await autoUpdater.downloadUpdate();
-    return true;
-  });
-  ipcMain.handle("family-tree-update-install", () => {
-    autoUpdater.quitAndInstall(true, true);
-    return true;
-  });
+  ipcMain.handle("family-tree-update-download", () => downloadUpdate());
+  ipcMain.handle("family-tree-update-install", () => installDownloadedUpdate());
   ipcMain.handle("family-tree-open-releases", async () => {
     await shell.openExternal(RELEASES_URL);
     return true;

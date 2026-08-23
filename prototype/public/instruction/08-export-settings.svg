@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-08-export-settings.jpg" role="img" aria-label="Экспорт дерева и настройки качества">
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
-    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
-  </defs>
-  <path class="line" d="M1690 122H1510V328H900"/>
-  <path class="line" d="M1690 322H1540V444H900"/>
-  <path class="line" d="M1690 522H1570V550H900"/>
-  <g>
-    <rect x="1600" y="92" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="117" class="label"><tspan x="1614">1. Выберите формат</tspan><tspan x="1614" dy="20" class="note">PDF, PNG, TIFF или листы</tspan></text>
-    <rect x="1600" y="292" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="317" class="label"><tspan x="1614">2. Настройте качество</tspan><tspan x="1614" dy="20" class="note">Экран, печать или плакат</tspan></text>
-    <rect x="1600" y="492" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="517" class="label"><tspan x="1614">3. Выберите разметку</tspan><tspan x="1614" dy="20" class="note">Плакат или листы</tspan></text>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-08-export-settings.jpg" data-captured-from="electron-desktop" role="img" aria-label="Экспорт дерева и настройки качества с подписями"><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker><style>.label{font:700 17px Arial,sans-serif;fill:#4e5947}.note{font:400 14.5px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style></defs><path class="line" d="M258 44H400V335H603"/><path class="line" d="M258 866H430V419H603"/><path class="line" d="M1560 44H1528V521H1182"/><path class="line" d="M1560 234H1540V655H1182"/><path class="line" d="M1560 866H1552V725H1182"/><g><rect x="18" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="32" y="35" class="label"><tspan x="32">1. Формат</tspan><tspan x="32" dy="20" class="note">PDF, PNG, TIFF или печать</tspan></text></g><g><rect x="18" y="832" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="32" y="857" class="label"><tspan x="32">2. Качество</tspan><tspan x="32" dy="20" class="note">Экран, печать или плакат</tspan></text></g><g><rect x="1560" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="35" class="label"><tspan x="1574">3. Размер карточек</tspan><tspan x="1574" dy="20" class="note">Настройте читаемость дерева</tspan></text></g><g><rect x="1560" y="200" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="225" class="label"><tspan x="1574">4. Разметка</tspan><tspan x="1574" dy="20" class="note">Большой плакат или листы</tspan></text></g><g><rect x="1560" y="832" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="857" class="label"><tspan x="1574">5. Настройки проекта</tspan><tspan x="1574" dy="20" class="note">Фото, крупный текст и поля карточки</tspan></text></g></svg>

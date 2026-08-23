@@ -1,6 +1,6 @@
 {
   "name": "family-tree-desktop",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -39,6 +39,7 @@
   "build": {
     "appId": "ru.teru1337.familytree",
     "productName": "Семейное древо",
+    "executableName": "FamilyTreeCircle",
     "artifactName": "FamilyTree-Setup-${version}.${ext}",
     "directories": {
       "output": "release",

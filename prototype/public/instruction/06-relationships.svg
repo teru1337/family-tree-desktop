@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-06-relationships.jpg" role="img" aria-label="Управление семейными связями">
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker>
-    <style>.label{font:600 16px Arial,sans-serif;fill:#4e5947}.note{font:400 14px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style>
-  </defs>
-  <path class="line" d="M1690 122H1510V440H1380"/>
-  <path class="line" d="M1690 304H1540V616H1310"/>
-  <path class="line" d="M1690 486H1570V704H1390"/>
-  <g>
-    <rect x="1600" y="92" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="117" class="label"><tspan x="1614">1. Тип связи</tspan><tspan x="1614" dy="20" class="note">Родитель, брак и другое</tspan></text>
-    <rect x="1600" y="274" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="299" class="label"><tspan x="1614">2. Происхождение</tspan><tspan x="1614" dy="20" class="note">Биологическая связь</tspan></text>
-    <rect x="1600" y="456" width="174" height="60" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/>
-    <text x="1614" y="481" class="label"><tspan x="1614">3. Сохранить связь</tspan><tspan x="1614" dy="20" class="note">Добавить её в дерево</tspan></text>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" data-source="source-06-relationships.jpg" data-captured-from="electron-desktop" role="img" aria-label="Управление семейными связями с подписями функций"><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#6e8d52"/></marker><style>.label{font:700 17px Arial,sans-serif;fill:#4e5947}.note{font:400 14.5px Arial,sans-serif;fill:#6f7769}.line{fill:none;stroke:#6e8d52;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}</style></defs><path class="line" d="M258 44H400V380H1274"/><path class="line" d="M258 866H430V439H1274"/><path class="line" d="M1560 44H1528V578H1515"/><path class="line" d="M1560 234H1540V764H1515"/><path class="line" d="M1560 866H1552V210H1520"/><g><rect x="18" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="32" y="35" class="label"><tspan x="32">1. Тип связи</tspan><tspan x="32" dy="20" class="note">Родитель, ребёнок, брак</tspan></text></g><g><rect x="18" y="832" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="32" y="857" class="label"><tspan x="32">2. Выберите человека</tspan><tspan x="32" dy="20" class="note">Связь получает отдельный ID</tspan></text></g><g><rect x="1560" y="10" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="35" class="label"><tspan x="1574">3. Происхождение</tspan><tspan x="1574" dy="20" class="note">Биология, усыновление, опека</tspan></text></g><g><rect x="1560" y="200" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="225" class="label"><tspan x="1574">4. Удалить ошибку</tspan><tspan x="1574" dy="20" class="note">Сначала выберите существующую связь</tspan></text></g><g><rect x="1560" y="832" width="240" height="68" rx="10" fill="#f4f8f0" stroke="#b7c8aa"/><text x="1574" y="857" class="label"><tspan x="1574">5. Роли участников</tspan><tspan x="1574" dy="20" class="note">Кто кем приходится друг другу</tspan></text></g></svg>
