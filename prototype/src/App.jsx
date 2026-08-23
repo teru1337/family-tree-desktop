@@ -45,6 +45,7 @@ import {
   readBackups,
   readWorkingCopy,
   serializeProject,
+  validateProject,
   verifyBackup,
   writeWorkingCopy,
 } from "./storage.js";
@@ -928,6 +929,23 @@ function UnsavedChangesModal({ onSave, onDiscard, onCancel }) {
   );
 }
 
+function DataQualityModal({ report, peopleCount, onClose }) {
+  const errors = Array.isArray(report?.errors) ? report.errors : [];
+  const warnings = Array.isArray(report?.warnings) ? report.warnings : [];
+  const issues = [...errors.map((message) => ({ kind: "error", message })), ...warnings.map((message) => ({ kind: "warning", message }))];
+  return (
+    <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="backup-modal quality-modal" role="dialog" aria-modal="true" aria-labelledby="quality-modal-title" onClick={(event) => event.stopPropagation()}>
+        <div className="backup-modal-header"><div><span className="eyebrow">Проверка проекта</span><h2 id="quality-modal-title">Проверить данные</h2><p>Проверка ничего не удаляет и не меняет. Она помогает заметить возможные дубликаты и противоречия перед сохранением семейной истории.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть проверку данных"><X size={21} /></button></div>
+        <div className={`quality-summary ${issues.length ? "quality-summary-warning" : "quality-summary-valid"}`} role="status"><div className="quality-summary-icon">{issues.length ? <Info size={22} /> : <CheckCircle size={22} weight="fill" />}</div><div><strong>{issues.length ? `Найдено замечаний: ${issues.length}` : "Замечаний не найдено"}</strong><span>Записей проверено: {peopleCount}</span></div></div>
+        {issues.length ? <div className="quality-list" aria-label="Список замечаний">{issues.map((issue, index) => <div className={`quality-item quality-item-${issue.kind}`} key={`${issue.kind}-${issue.message}`}><span className="quality-item-number">{index + 1}</span><span>{issue.message}</span></div>)}</div> : <div className="quality-empty"><CheckCircle size={30} weight="fill" /><strong>Сведения выглядят согласованно</strong><span>Если вы добавите новые записи или связи, проверку можно запустить снова.</span></div>}
+        <div className="quality-note"><Info size={16} /> Возможное противоречие не всегда означает ошибку: например, однофамильцы могут быть разными людьми. Откройте записи и уточните сведения вручную.</div>
+        <div className="confirm-actions"><button type="button" className="button button-primary" onClick={onClose}>Понятно</button></div>
+      </section>
+    </div>
+  );
+}
+
 function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }) {
   const [closing, setClosing] = useState(false);
   const requestClose = () => {
@@ -1331,6 +1349,8 @@ export function App() {
   const [returnToMenuAfterModal, setReturnToMenuAfterModal] = useState("");
   const [updateStatus, setUpdateStatus] = useState(null);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [qualityReport, setQualityReport] = useState({ valid: true, errors: [], warnings: [] });
   const historyRef = useRef(null);
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false });
   const fileInputRef = useRef(null);
@@ -1471,6 +1491,7 @@ export function App() {
       if (event.key === "Escape") {
         event.preventDefault();
         if (updateOpen) setUpdateOpen(false);
+        else if (qualityOpen) setQualityOpen(false);
         else if (pendingUnsavedAction) setPendingUnsavedAction(null);
         else if (deleteConfirmId) setDeleteConfirmId("");
         else if (relationshipDeleteConfirm) setRelationshipDeleteConfirm(null);
@@ -1526,7 +1547,7 @@ export function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [historyStatus, updateOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
+  }, [historyStatus, updateOpen, qualityOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -1807,6 +1828,18 @@ export function App() {
     setRelationshipEditing(false);
   };
   const buildPayload = () => createProjectPayload(people, projectMeta, partnerships);
+  const openQualityCheck = () => {
+    try {
+      const report = validateProject(buildPayload());
+      setQualityReport(report);
+      setMoreOpen(false);
+      setQualityOpen(true);
+    } catch (error) {
+      setQualityReport({ valid: false, errors: [explainUserError(error, { action: "Не удалось проверить данные", next: "сохраните копию проекта и повторите проверку" })], warnings: [] });
+      setMoreOpen(false);
+      setQualityOpen(true);
+    }
+  };
   const commitLocalSave = (payload, reason = "save") => {
     const normalized = writeWorkingCopy(payload);
     const backup = addBackup(payload, reason);
@@ -2113,7 +2146,7 @@ export function App() {
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
            <button type="button" className="header-action" onClick={() => openExport("print")}><Printer size={20} /> Печать</button>
-           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setArchiveImport(null); setArchiveOpen(true); }}><Copy size={16} /> Архив материалов</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => openRelationshipCalculator()} disabled={people.length < 2}><UsersThree size={16} /> Узнать родство</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
+           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setArchiveImport(null); setArchiveOpen(true); }}><Copy size={16} /> Архив материалов</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => openRelationshipCalculator()} disabled={people.length < 2}><UsersThree size={16} /> Узнать родство</button><button type="button" onClick={openQualityCheck}><Info size={16} /> Проверить данные</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
        <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}>
@@ -2139,6 +2172,7 @@ export function App() {
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
        {pendingUnsavedAction && <UnsavedChangesModal onSave={() => continueAfterUnsavedChoice(true)} onDiscard={() => continueAfterUnsavedChoice(false)} onCancel={() => setPendingUnsavedAction(null)} />}
        {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
+       {qualityOpen && <DataQualityModal report={qualityReport} peopleCount={people.length} onClose={() => setQualityOpen(false)} />}
        {updateStatus && updateOpen && ["available", "downloading", "downloaded"].includes(updateStatus.state) && <UpdateModal status={updateStatus} onClose={() => setUpdateOpen(false)} onDownload={downloadUpdate} onInstall={installUpdate} onOpenReleases={openReleasesPage} />}
      </div>
   );

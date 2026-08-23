@@ -44,6 +44,12 @@ function sameBirthYear(left, right) {
   return Boolean(leftBounds && rightBounds && leftBounds.min <= rightBounds.max && rightBounds.min <= leftBounds.max);
 }
 
+function birthYearsText(person) {
+  const bounds = birthYearBounds(person);
+  if (!bounds) return "дата неизвестна";
+  return bounds.min === bounds.max ? String(bounds.min) : `${bounds.min}–${bounds.max}`;
+}
+
 function relationYear(value) {
   return yearFromValue(value);
 }
@@ -59,7 +65,20 @@ function inspectDuplicates(people, warnings) {
     if (!nameKey || nameKey === "человекбезимени") return;
     const sameNamePeople = byName.get(nameKey) || [];
     sameNamePeople.forEach((other) => {
-      const samePlace = normalizedKey(person?.place) && normalizedKey(person?.place) === normalizedKey(other?.place);
+      const personPlace = normalizedKey(person?.place);
+      const otherPlace = normalizedKey(other?.place);
+      const samePlace = personPlace && personPlace === otherPlace;
+      const differentPlaces = personPlace && otherPlace && personPlace !== otherPlace;
+      const personYears = birthYearBounds(person);
+      const otherYears = birthYearBounds(other);
+      const differentBirthYears = personYears && otherYears && !sameBirthYear(person, other);
+      const contradictoryFacts = [
+        differentBirthYears ? `разные годы рождения (${birthYearsText(other)} и ${birthYearsText(person)})` : "",
+        differentPlaces ? `разные места рождения («${cleanText(other.place)}» и «${cleanText(person.place)}»)` : "",
+      ].filter(Boolean);
+      if (contradictoryFacts.length > 0) {
+        addWarning(warnings, `Противоречие данных: у записей «${personLabel(other)}» (ID ${other.id}) и «${personLabel(person)}» (ID ${person.id}) совпадает ФИО, но указаны ${contradictoryFacts.join(" и ")}. Проверьте, не дублируются ли записи.`);
+      }
       const hasNoSupportingData = !birthYearBounds(person) && !birthYearBounds(other) && !normalizedKey(person?.place) && !normalizedKey(other?.place);
       if (!sameBirthYear(person, other) && !samePlace && !hasNoSupportingData) return;
       const facts = [sameBirthYear(person, other) ? "дату рождения" : "", samePlace ? "место рождения" : ""].filter(Boolean).join(" и ") || "ФИО";
@@ -67,6 +86,64 @@ function inspectDuplicates(people, warnings) {
     });
     sameNamePeople.push(person);
     byName.set(nameKey, sameNamePeople);
+  });
+}
+
+function inspectTimelineEvents(people, warnings) {
+  people.forEach((person) => {
+    const events = Array.isArray(person?.timelineEvents) ? person.timelineEvents : [];
+    const birthYears = birthYearBounds(person);
+    const seenEvents = new Set();
+    events.forEach((event) => {
+      const eventYear = relationYear(event?.date);
+      if (eventYear !== null && birthYears && eventYear < birthYears.min) {
+        addWarning(warnings, `Противоречие дат: событие «${cleanText(event?.title) || "Без названия"}» у «${personLabel(person)}» указано раньше рождения (${eventYear} раньше ${birthYearsText(person)}).`);
+      }
+      const eventKey = `${normalizedKey(event?.title)}::${eventYear ?? cleanText(event?.date)}`;
+      if (normalizedKey(event?.title) && seenEvents.has(eventKey)) {
+        addWarning(warnings, `Возможный дубликат события: у «${personLabel(person)}» повторяется «${cleanText(event?.title)}» за ${eventYear ?? "ту же дату"}.`);
+      }
+      if (normalizedKey(event?.title)) seenEvents.add(eventKey);
+    });
+  });
+}
+
+function inspectRelationConsistency(peopleById, relations, warnings) {
+  const parentRelations = new Map();
+  const activePartnerships = new Map();
+  relations.forEach((relation) => {
+    if (relation?.kind === "parent") {
+      const parentId = String(relation.parentId || "");
+      const childId = String(relation.childId || "");
+      if (!parentId || !childId) return;
+      if (parentId === childId) {
+        const person = peopleById.get(parentId);
+        addWarning(warnings, `Невозможная связь: «${personLabel(person)}» указан одновременно родителем и ребёнком самого себя.`);
+        return;
+      }
+      const type = cleanText(relation.type) || "unknown";
+      const key = `${parentId}::${childId}::${type}`;
+      if (parentRelations.has(key)) {
+        const parent = peopleById.get(parentId);
+        const child = peopleById.get(childId);
+        addWarning(warnings, `Возможный дубликат связи: между «${personLabel(parent)}» и «${personLabel(child)}» повторяется один и тот же тип родства. Проверьте ID связей.`);
+      } else {
+        parentRelations.set(key, relation.id || key);
+      }
+      return;
+    }
+    if (relation?.kind !== "partnership") return;
+    const personIds = Array.isArray(relation.personIds) ? relation.personIds.map(String) : [];
+    if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleById.has(id))) return;
+    if (relation.status === "divorced") return;
+    const pairKey = [...personIds].sort().join("::");
+    if (activePartnerships.has(pairKey)) {
+      const first = peopleById.get(personIds[0]);
+      const second = peopleById.get(personIds[1]);
+      addWarning(warnings, `Возможный дубликат связи: у «${personLabel(first)}» и «${personLabel(second)}» несколько активных записей о браке или партнёрстве. Проверьте даты и ID связей.`);
+    } else {
+      activePartnerships.set(pairKey, relation.id || pairKey);
+    }
   });
 }
 
@@ -138,6 +215,8 @@ export function inspectFamilyData(peopleInput, relationsInput = []) {
   const peopleById = new Map(people.map((person) => [String(person?.id || ""), person]).filter(([id]) => id));
   const warnings = [];
   inspectDuplicates(people, warnings);
+  inspectTimelineEvents(people, warnings);
+  inspectRelationConsistency(peopleById, relations, warnings);
   inspectParentRelations(peopleById, relations, warnings);
   inspectPartnerships(peopleById, relations, warnings);
   return { warnings };
