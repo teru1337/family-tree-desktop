@@ -31,7 +31,7 @@ assert.match(stylesSource, /\.instruction-card\s*\{[^}]*resize:\s*both/);
 assert.match(stylesSource, /\.instruction-card::after/);
 assert.match(stylesSource, /width:\s*min\(1540px/);
 assert.match(stylesSource, /height:\s*min\(900px/);
-assert.match(stylesSource, /\.instruction-page\s*\{[^}]*minmax\(0, 1\.85fr\)/);
+assert.match(stylesSource, /\.instruction-page\s*\{[^}]*minmax\(0, 2fr\)/);
 assert.match(appSource, /Открыть изображение крупно/);
 assert.match(stylesSource, /\.instruction-preview-stage\s*\{[^}]*width:\s*1800px[^}]*height:\s*1000px/);
 for (const assetName of assetNames) {

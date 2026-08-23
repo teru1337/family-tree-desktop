@@ -561,10 +561,16 @@ function ConfirmModal({ title, description, confirmLabel, onClose, onConfirm }) 
 }
 
 function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }) {
+  const [closing, setClosing] = useState(false);
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(onClose, 160);
+  };
   return (
-    <div className="main-menu-backdrop" role="presentation" onClick={onClose}>
+    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""}`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <section className="main-menu-card" role="dialog" aria-modal="true" aria-labelledby="main-menu-title" onClick={(event) => event.stopPropagation()}>
-        <button type="button" className="icon-button main-menu-close" onClick={onClose} aria-label="Закрыть главное меню"><X size={21} /></button>
+        <button type="button" className="icon-button main-menu-close" onClick={requestClose} aria-label="Закрыть главное меню"><X size={21} /></button>
         <div className="main-menu-brand"><TreeStructure size={46} weight="fill" /><div><span className="eyebrow">Локальное приложение</span><h1 id="main-menu-title">Семейное древо</h1><p>Храните историю семьи на своём компьютере.</p></div></div>
         <div className="main-menu-list">
           <button type="button" className="main-menu-action main-menu-action-primary" onClick={onCreate}><Plus size={21} weight="bold" /><span><strong>Создать древо</strong><small>Начать новый семейный проект</small></span><CaretRight size={18} /></button>
@@ -622,17 +628,34 @@ const instructionSteps = [
 function InstructionModal({ onClose }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const instructionCardRef = useRef(null);
+  const pointerStartedInsideCardRef = useRef(false);
   const step = instructionSteps[activeIndex];
   const goTo = (index) => setActiveIndex(Math.max(0, Math.min(instructionSteps.length - 1, index)));
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(onClose, 180);
+  };
+  const handleBackdropPointerDown = (event) => {
+    pointerStartedInsideCardRef.current = instructionCardRef.current?.contains(event.target) || false;
+  };
+  const handleBackdropClick = (event) => {
+    const clickedBackdrop = event.target === event.currentTarget;
+    const startedInsideCard = pointerStartedInsideCardRef.current;
+    pointerStartedInsideCardRef.current = false;
+    if (clickedBackdrop && !startedInsideCard) requestClose();
+  };
   return (
-    <div className="instruction-backdrop" role="presentation" onClick={onClose}>
-      <section className="instruction-card" role="dialog" aria-modal="true" aria-labelledby="instruction-title" onClick={(event) => event.stopPropagation()}>
-        <header className="instruction-header"><div><span className="eyebrow">Пошаговая инструкция</span><h2 id="instruction-title">Как пользоваться семейным древом</h2><p>Выберите раздел слева или листайте кнопками «Назад» и «Далее». Окно можно увеличить за правый нижний угол.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть инструкцию"><X size={22} /></button></header>
+    <div className={`instruction-backdrop ${closing ? "is-closing" : ""}`} role="presentation" onPointerDown={handleBackdropPointerDown} onClick={handleBackdropClick}>
+      <section ref={instructionCardRef} className={`instruction-card ${closing ? "is-closing" : ""}`} role="dialog" aria-modal="true" aria-labelledby="instruction-title" onClick={(event) => event.stopPropagation()}>
+        <header className="instruction-header"><div><span className="eyebrow">Пошаговая инструкция</span><h2 id="instruction-title">Как пользоваться семейным древом</h2><p>Выберите раздел слева или листайте кнопками «Назад» и «Далее». Окно можно увеличить за правый нижний угол.</p></div><button type="button" className="icon-button backup-close" onClick={requestClose} aria-label="Закрыть инструкцию"><X size={22} /></button></header>
         <div className="instruction-layout">
           <nav className="instruction-nav" aria-label="Разделы инструкции">{instructionSteps.map((item, index) => <button type="button" key={item.image} className={`instruction-nav-item ${index === activeIndex ? "selected" : ""}`} onClick={() => goTo(index)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item.title}</strong></button>)}</nav>
-          <article className="instruction-page"><div className="instruction-image-frame"><div className="instruction-image-stage"><img className="instruction-source-image" src={`/instruction/${step.source}`} alt={`Экран приложения: ${step.title}`} /><img className="instruction-overlay-image" src={`/instruction/${step.image}`} alt="" aria-hidden="true" /></div><button type="button" className="button button-ghost instruction-image-expand" onClick={() => setPreviewOpen(true)}>Открыть изображение крупно</button></div><div className="instruction-copy"><span className="instruction-counter">Шаг {activeIndex + 1} из {instructionSteps.length}</span><h3>{step.title}</h3><p>{step.text}</p><ul>{step.tips.map((tip) => <li key={tip}><CheckCircle size={17} weight="fill" />{tip}</li>)}</ul></div></article>
+          <article className="instruction-page"><div className="instruction-image-frame"><div className="instruction-image-stage"><img className="instruction-source-image" src={`/instruction/${step.source}`} alt={`Экран приложения: ${step.title}`} /><img className="instruction-overlay-image" src={`/instruction/${step.image}`} alt="" aria-hidden="true" /></div><button type="button" className="button instruction-image-expand" onClick={() => setPreviewOpen(true)}><MagnifyingGlass size={16} /> Открыть изображение крупно</button></div><div className="instruction-copy"><span className="instruction-counter">Шаг {activeIndex + 1} из {instructionSteps.length}</span><h3>{step.title}</h3><p>{step.text}</p><ul>{step.tips.map((tip) => <li key={tip}><CheckCircle size={17} weight="fill" />{tip}</li>)}</ul></div></article>
         </div>
-        <footer className="instruction-footer"><button type="button" className="button button-ghost" onClick={() => goTo(activeIndex - 1)} disabled={activeIndex === 0}><CaretLeft size={18} /> Назад</button><div className="instruction-dots" aria-label="Прогресс инструкции">{instructionSteps.map((item, index) => <button type="button" key={item.image} className={index === activeIndex ? "selected" : ""} onClick={() => goTo(index)} aria-label={`Перейти к шагу ${index + 1}`} />)}</div><button type="button" className="button button-primary" onClick={() => activeIndex === instructionSteps.length - 1 ? onClose() : goTo(activeIndex + 1)}>{activeIndex === instructionSteps.length - 1 ? "Завершить" : "Далее"} <CaretRight size={18} /></button></footer>
+        <footer className="instruction-footer"><button type="button" className="button button-ghost" onClick={() => goTo(activeIndex - 1)} disabled={activeIndex === 0}><CaretLeft size={18} /> Назад</button><div className="instruction-dots" aria-label="Прогресс инструкции">{instructionSteps.map((item, index) => <button type="button" key={item.image} className={index === activeIndex ? "selected" : ""} onClick={() => goTo(index)} aria-label={`Перейти к шагу ${index + 1}`} />)}</div><button type="button" className="button button-primary" onClick={() => activeIndex === instructionSteps.length - 1 ? requestClose() : goTo(activeIndex + 1)}>{activeIndex === instructionSteps.length - 1 ? "Завершить" : "Далее"} <CaretRight size={18} /></button></footer>
       </section>
       {previewOpen && <div className="instruction-preview-backdrop" role="presentation" onClick={() => setPreviewOpen(false)}><section className="instruction-preview-card" role="dialog" aria-modal="true" aria-labelledby="instruction-preview-title" onClick={(event) => event.stopPropagation()}><header className="instruction-preview-header"><div><span className="eyebrow">Увеличенный просмотр</span><h3 id="instruction-preview-title">{step.title}</h3><p>Здесь схема показана в большом размере. При необходимости прокрутите её.</p></div><button type="button" className="icon-button backup-close" onClick={() => setPreviewOpen(false)} aria-label="Закрыть увеличенный просмотр"><X size={22} /></button></header><div className="instruction-preview-scroll"><div className="instruction-preview-stage"><img className="instruction-source-image" src={`/instruction/${step.source}`} alt={`Экран приложения крупно: ${step.title}`} /><img className="instruction-overlay-image" src={`/instruction/${step.image}`} alt="" aria-hidden="true" /></div></div></section></div>}
     </div>
@@ -805,6 +828,7 @@ export function App() {
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [instructionOpen, setInstructionOpen] = useState(false);
+  const [returnToMenuAfterModal, setReturnToMenuAfterModal] = useState("");
   const [updateStatus, setUpdateStatus] = useState(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const fileInputRef = useRef(null);
@@ -828,7 +852,7 @@ export function App() {
     writeWorkingCopy(payload);
     setLastSavedAt(payload.manifest.updatedAt);
     setDirty(false);
-    setSettingsOpen(false);
+    closeSettings();
     setToast("Настройки сохранены");
   };
 
@@ -1070,11 +1094,27 @@ export function App() {
   };
   const downloadBackup = (backup) => downloadProjectFile(backup.payload, `резервная-копия-${backup.createdAt.slice(0, 10)}.familytree`);
   const openExport = (format = "pdf") => { setExportPreset(format); setExportModalOpen(true); setMoreOpen(false); };
-  const openInstruction = () => { setMainMenuOpen(false); setMoreOpen(false); setInstructionOpen(true); };
-  const openSettings = () => { setMainMenuOpen(false); setMoreOpen(false); setSettingsOpen(true); };
-  const createNewTree = () => {
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    if (returnToMenuAfterModal === "settings") setMainMenuOpen(true);
+    setReturnToMenuAfterModal("");
+  };
+  const closeInstruction = () => {
+    setInstructionOpen(false);
+    if (returnToMenuAfterModal === "instruction") setMainMenuOpen(true);
+    setReturnToMenuAfterModal("");
+  };
+  const cancelNewTree = () => {
+    setNewTreeConfirmOpen(false);
+    if (returnToMenuAfterModal === "new-tree") setMainMenuOpen(true);
+    setReturnToMenuAfterModal("");
+  };
+  const openInstruction = (fromMenu = false) => { setMainMenuOpen(false); setMoreOpen(false); setReturnToMenuAfterModal(fromMenu ? "instruction" : ""); setInstructionOpen(true); };
+  const openSettings = (fromMenu = false) => { setMainMenuOpen(false); setMoreOpen(false); setReturnToMenuAfterModal(fromMenu ? "settings" : ""); setSettingsOpen(true); };
+  const createNewTree = (fromMenu = false) => {
     if (people.length) {
       setMainMenuOpen(false);
+      setReturnToMenuAfterModal(fromMenu ? "new-tree" : "");
       setNewTreeConfirmOpen(true);
       return;
     }
@@ -1101,6 +1141,7 @@ export function App() {
     setConnectionTargetId("");
     setDeleteConfirmId("");
     setNewTreeConfirmOpen(false);
+    setReturnToMenuAfterModal("");
     setMainMenuOpen(false);
     setDirty(true);
     setToast("Новое дерево создано");
@@ -1138,12 +1179,12 @@ export function App() {
        {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> {toast}</div>}
        {backupOpen && <BackupModal backups={backups} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
        {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onClose={() => setViewSettingsOpen(false)} />}
-       {instructionOpen && <InstructionModal onClose={() => setInstructionOpen(false)} />}
+       {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
-       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} onSave={saveProjectSettings} onClose={() => setSettingsOpen(false)} />}
+       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
-       {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={() => setNewTreeConfirmOpen(false)} onConfirm={applyNewTree} />}
-       {mainMenuOpen && <MainMenuModal onCreate={createNewTree} onLoad={openProject} onSettings={openSettings} onHelp={openInstruction} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
+       {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
+       {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
        {updateStatus && updateOpen && ["available", "downloading", "downloaded"].includes(updateStatus.state) && <UpdateModal status={updateStatus} onClose={() => setUpdateOpen(false)} onDownload={downloadUpdate} onInstall={installUpdate} onOpenReleases={openReleasesPage} />}
      </div>
   );
