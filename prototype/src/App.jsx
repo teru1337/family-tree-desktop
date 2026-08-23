@@ -50,6 +50,7 @@ import {
 import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate, validateDateRecord } from "./dates.js";
 import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
 import { DEFAULT_SEARCH_FILTERS, filterPeople } from "./search.js";
+import { explainUserError } from "./ui-feedback.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -144,6 +145,39 @@ function addSiblingLink(links, personId, type, siblingId = "unknown-person") {
   let suffix = 1;
   while (current.some((link) => link.id === id)) id = `${baseId}-${++suffix}`;
   return [...current, { id, personId, type }];
+}
+
+function relationshipDeleteOptions(person, people, partnerships) {
+  if (!person) return [];
+  const find = (id) => people.find((item) => item.id === id);
+  const options = [];
+  const parentLinks = person.parentLinks?.length
+    ? person.parentLinks
+    : (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" }));
+  parentLinks.forEach((link) => {
+    const target = find(link.personId);
+    if (target) options.push({ id: link.id || makeParentLinkId(person.id, link.personId, link.type || "biological"), kind: "parent", parentId: link.personId, childId: person.id, type: link.type || "biological", label: `Родитель: ${personDisplayName(target)}` });
+  });
+  (person.childIds || []).forEach((childId) => {
+    const target = find(childId);
+    if (!target) return;
+    const link = target.parentLinks?.find((item) => item.personId === person.id);
+    const type = link?.type || "biological";
+    options.push({ id: link?.id || makeParentLinkId(childId, person.id, type), kind: "parent", parentId: person.id, childId, type, label: `Ребёнок: ${personDisplayName(target)}` });
+  });
+  const siblingLinks = person.siblingLinks?.length
+    ? person.siblingLinks
+    : (person.siblingIds || []).map((personId) => ({ id: makeSiblingLinkId(person.id, personId, "biological"), personId, type: "biological" }));
+  siblingLinks.forEach((link) => {
+    const target = find(link.personId);
+    if (target) options.push({ id: link.id || makeSiblingLinkId(person.id, link.personId, link.type || "biological"), kind: "sibling", personIds: [person.id, link.personId], type: link.type || "biological", label: `Брат или сестра: ${personDisplayName(target)}` });
+  });
+  partnerships.filter((partnership) => partnership.personIds.includes(person.id)).forEach((partnership) => {
+    const targetId = partnership.personIds.find((id) => id !== person.id);
+    const target = find(targetId);
+    if (target) options.push({ id: partnership.id, kind: "partnership", personIds: [...partnership.personIds], label: `${partnershipTypeLabel[partnership.type] || "Связь"}: ${personDisplayName(target)}` });
+  });
+  return options.filter((option, index, all) => all.findIndex((item) => item.id === option.id) === index);
 }
 
 function roleByGender(person, male, female, unknown) {
@@ -375,8 +409,9 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   );
 }
 
-function RelationshipEditor({ person, people, partnerships, onSave, onCancel }) {
+function RelationshipEditor({ person, people, partnerships, onSave, onDeleteRelationship, onCancel }) {
   const [draft, setDraft] = useState({ kind: "parent", targetId: people.find((item) => item.id !== person.id)?.id || "", parentType: "biological", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" });
+  const [relationToDelete, setRelationToDelete] = useState("");
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
   const changeKind = (kind) => setDraft((current) => ({ ...current, kind, parentType: kind === "sibling" ? "biological" : (kind === "parent" || kind === "child") ? "biological" : current.parentType }));
   const knownPartnerIds = new Set(partnerships.filter((partnership) => partnership.personIds.includes(person.id)).flatMap((partnership) => partnership.personIds.filter((id) => id !== person.id)));
@@ -387,6 +422,7 @@ function RelationshipEditor({ person, people, partnerships, onSave, onCancel }) 
   const isSibling = draft.kind === "sibling";
   const isPartnership = ["marriage", "partnership", "divorce"].includes(draft.kind);
   const isDivorce = draft.kind === "divorce";
+  const existingRelations = relationshipDeleteOptions(person, people, partnerships);
   const dateValue = isDivorce ? draft.endDate : draft.startDate;
   const datePrecision = isDivorce ? draft.endDatePrecision : draft.startDatePrecision;
   const save = () => onSave({ ...draft, targetId });
@@ -401,6 +437,7 @@ function RelationshipEditor({ person, people, partnerships, onSave, onCancel }) 
         {isPartnership && <><label className="field field-full"><span>{isDivorce ? "Дата развода" : "Дата начала отношений"} <em>необязательно</em></span><input value={dateValue} onChange={(event) => update(isDivorce ? "endDate" : "startDate", event.target.value)} placeholder="Точный день или год" /></label><div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${datePrecision === "exact" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${datePrecision === "year" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "year")}>Только год</button><button type="button" className={`date-option ${datePrecision === "approximate" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${datePrecision === "unknown" ? "selected" : ""}`} onClick={() => update(isDivorce ? "endDatePrecision" : "startDatePrecision", "unknown")}>Неизвестно</button></div></div></>}
         {isDivorce && !targetOptions.length && <p className="relationship-hint field-full">У этого человека пока нет супруга или партнёра, для которого можно указать развод.</p>}
       </div>
+      {existingRelations.length > 0 && <div className="relationship-delete-block"><div><span className="field-label">Удалить существующую связь</span><small>Выберите связь, если она была добавлена ошибочно.</small></div><select aria-label="Связь для удаления" value={relationToDelete} onChange={(event) => setRelationToDelete(event.target.value)}><option value="">Не выбрано</option>{existingRelations.map((relation) => <option key={relation.id} value={relation.id}>{relation.label}</option>)}</select><button type="button" className="button delete-person-button" onClick={() => onDeleteRelationship(relationToDelete)} disabled={!relationToDelete}><Trash size={18} /> Удалить связь</button></div>}
       <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button><button type="button" className="button button-primary save-button" onClick={save} disabled={!targetId}><FloppyDisk size={18} weight="bold" /> Сохранить связь</button></div>
     </div>
   );
@@ -909,7 +946,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
         })
         .catch((error) => {
           if (cancelled) return;
-          setPreviewError(error.message || "Не удалось подготовить предпросмотр");
+          setPreviewError(explainUserError(error, { action: "Не удалось подготовить предпросмотр", next: "проверьте параметры экспорта и повторите" }));
         })
         .finally(() => {
           if (!cancelled) setPreviewBusy(false);
@@ -944,7 +981,7 @@ function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, s
       }
       onClose();
     } catch (error) {
-      onToast(error.message || "Не удалось подготовить файл");
+      onToast(explainUserError(error, { action: "Не удалось подготовить файл", next: "проверьте формат и параметры экспорта, затем повторите" }));
     } finally {
       setBusy(false);
     }
@@ -1012,8 +1049,10 @@ export function App() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState("");
+  const [relationshipDeleteConfirm, setRelationshipDeleteConfirm] = useState(null);
   const [newTreeConfirmOpen, setNewTreeConfirmOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [toastAction, setToastAction] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [pendingUnsavedAction, setPendingUnsavedAction] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(loadedSession?.savedAt || null);
@@ -1053,6 +1092,7 @@ export function App() {
     applyHistorySnapshot(nextHistory.present);
     setHistoryStatus(getHistoryStatus(nextHistory));
     setDirty(true);
+    setToastAction(null);
     setToast("Последнее действие отменено");
   };
   const redoAction = () => {
@@ -1090,7 +1130,7 @@ export function App() {
       closeSettings();
       setToast("Настройки сохранены");
     } catch (error) {
-      setToast(error.message || "Не удалось сохранить настройки");
+      setToast(explainUserError(error, { action: "Не удалось сохранить настройки", next: "проверьте доступ к локальному хранилищу и повторите" }));
     }
   };
 
@@ -1111,7 +1151,7 @@ export function App() {
       setUpdateStatus(status);
       if (status.state === "available" || status.state === "downloaded") setUpdateOpen(true);
       if (status.state === "not-available") setToast("Установлена последняя версия приложения");
-      if (status.state === "error") setToast("Не удалось проверить обновления");
+      if (status.state === "error") setToast(explainUserError(status.error || status.message, { action: "Не удалось проверить обновления", next: "проверьте интернет-соединение и повторите позже" }));
     });
     return unsubscribe;
   }, []);
@@ -1125,7 +1165,7 @@ export function App() {
         setLastBackupAt(backup?.createdAt || null);
         setBackups(readBackups());
       } catch (error) {
-        setToast(error.message || "Не удалось выполнить автосохранение");
+        setToast(explainUserError(error, { action: "Не удалось выполнить автосохранение", next: "проверьте свободное место и сохраните проект вручную" }));
       }
     }, 800);
     return () => window.clearTimeout(timeout);
@@ -1161,6 +1201,7 @@ export function App() {
         if (updateOpen) setUpdateOpen(false);
         else if (pendingUnsavedAction) setPendingUnsavedAction(null);
         else if (deleteConfirmId) setDeleteConfirmId("");
+        else if (relationshipDeleteConfirm) setRelationshipDeleteConfirm(null);
         else if (newTreeConfirmOpen) cancelNewTree();
         else if (exportModalOpen) setExportModalOpen(false);
         else if (instructionOpen) closeInstruction();
@@ -1212,7 +1253,7 @@ export function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [historyStatus, updateOpen, pendingUnsavedAction, deleteConfirmId, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
+  }, [historyStatus, updateOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -1222,22 +1263,22 @@ export function App() {
     setToast("Проверяем обновления…");
     try {
       await window.familyTreeDesktop.checkForUpdates();
-    } catch {
-      setToast("Не удалось проверить обновления");
+    } catch (error) {
+      setToast(explainUserError(error, { action: "Не удалось проверить обновления", next: "проверьте интернет-соединение и повторите позже" }));
     }
   };
   const downloadUpdate = async () => {
     try {
       await window.familyTreeDesktop?.downloadUpdate?.();
-    } catch {
-      setToast("Не удалось скачать обновление");
+    } catch (error) {
+      setToast(explainUserError(error, { action: "Не удалось скачать обновление", next: "проверьте интернет-соединение и повторите позже" }));
     }
   };
   const installUpdate = async () => {
     try {
       await window.familyTreeDesktop?.installUpdate?.();
-    } catch {
-      setToast("Не удалось установить обновление");
+    } catch (error) {
+      setToast(explainUserError(error, { action: "Не удалось установить обновление", next: "перезапустите приложение и повторите установку" }));
     }
   };
   const openReleasesPage = async () => {
@@ -1300,11 +1341,67 @@ export function App() {
     setBackups(readBackups());
     setLastBackupAt(backup?.createdAt || null);
     setDirty(true);
-    setToast(`Удалён человек: ${personDisplayName(personToDelete)}`);
+    const message = `Удалён человек: ${personDisplayName(personToDelete)}`;
+    setToast(message);
+    setToastAction({ message, label: "Отменить", onClick: undoAction });
+  };
+  const requestDeleteRelationship = (relationId) => {
+    const relation = relationshipDeleteOptions(selectedPerson, people, partnerships).find((item) => item.id === relationId);
+    if (relation) setRelationshipDeleteConfirm(relation);
+  };
+  const deleteRelationship = () => {
+    const relation = relationshipDeleteConfirm;
+    if (!relation) return;
+    const backup = addBackup(buildPayload(), "before-delete");
+    const makeParentLinks = (person) => person.parentLinks?.length
+      ? person.parentLinks
+      : (person.parentIds || []).map((parentId) => ({ id: makeParentLinkId(person.id, parentId, "biological"), personId: parentId, type: "biological" }));
+    const makeSiblingLinks = (person) => person.siblingLinks?.length
+      ? person.siblingLinks
+      : (person.siblingIds || []).map((siblingId) => ({ id: makeSiblingLinkId(person.id, siblingId, "biological"), personId: siblingId, type: "biological" }));
+    let nextPeople = people;
+    let nextPartnerships = partnerships;
+    if (relation.kind === "partnership") {
+      nextPartnerships = partnerships.filter((partnership) => partnership.id !== relation.id);
+      const stillConnected = nextPartnerships.some((partnership) => relation.personIds.every((id) => partnership.personIds.includes(id)));
+      nextPeople = people.map((person) => relation.personIds.includes(person.id) && !stillConnected ? { ...person, partnerIds: (person.partnerIds || []).filter((id) => !relation.personIds.includes(id)) } : person);
+    }
+    if (relation.kind === "parent") {
+      const remainingParentRelation = (personId) => nextPeople.some((person) => makeParentLinks(person).some((link) => link.id !== relation.id && link.personId === relation.parentId && person.id === relation.childId));
+      nextPeople = people.map((person) => {
+        if (person.id === relation.childId) {
+          const parentLinks = makeParentLinks(person).filter((link) => link.id !== relation.id && !(link.personId === relation.parentId && link.type === relation.type));
+          const parentIds = relation.type === "biological" && !remainingParentRelation(person.id) ? (person.parentIds || []).filter((id) => id !== relation.parentId) : [...(person.parentIds || [])];
+          return { ...person, parentIds, parentLinks };
+        }
+        if (person.id === relation.parentId && !remainingParentRelation(relation.childId)) return { ...person, childIds: (person.childIds || []).filter((id) => id !== relation.childId) };
+        return person;
+      });
+    }
+    if (relation.kind === "sibling") {
+      const [firstId, secondId] = relation.personIds;
+      nextPeople = people.map((person) => {
+        if (person.id !== firstId && person.id !== secondId) return person;
+        const otherId = person.id === firstId ? secondId : firstId;
+        const siblingLinks = makeSiblingLinks(person).filter((link) => link.id !== relation.id && !(link.personId === otherId && link.type === relation.type));
+        const hasRemainingSibling = siblingLinks.some((link) => link.personId === otherId);
+        return { ...person, siblingIds: hasRemainingSibling ? [...(person.siblingIds || [])] : (person.siblingIds || []).filter((id) => id !== otherId), siblingLinks };
+      });
+    }
+    setPeople(nextPeople);
+    setPartnerships(nextPartnerships);
+    setRelationshipDeleteConfirm(null);
+    setRelationshipEditing(false);
+    setBackups(readBackups());
+    setLastBackupAt(backup?.createdAt || null);
+    setDirty(true);
+    const message = `Связь удалена: ${relation.label}`;
+    setToast(message);
+    setToastAction({ message, label: "Отменить", onClick: undoAction });
   };
   const savePerson = ({ addAnother = false } = {}) => {
     const validationErrors = validatePersonDraft(draft, { isNew: !draft?.id, relationshipMode, connectionTargetId });
-    if (Object.keys(validationErrors).length) { setToast("Проверьте заполненные поля"); return; }
+    if (Object.keys(validationErrors).length) { setToast("Не удалось сохранить человека. Причина: некоторые поля заполнены неверно. Следующее действие: исправьте подсвеченные поля и повторите."); return; }
     const normalizedName = draft.isUnknown ? "" : draft.name.trim() || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
     const personToSave = { ...draft, isUnknown: Boolean(draft.isUnknown), name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
@@ -1416,7 +1513,7 @@ export function App() {
       const warningCount = normalized.validationWarnings?.length || 0;
       setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : `Проект сохранён: ${projectMeta.fileName || "семейное-древо.familytree"}`);
     } catch (error) {
-      setToast(error.message || "Не удалось сохранить проект");
+      setToast(explainUserError(error, { action: "Не удалось сохранить проект", next: "проверьте свободное место и доступ к папке загрузок" }));
     }
   };
   const saveForContinuation = () => {
@@ -1471,7 +1568,7 @@ export function App() {
       setMainMenuOpen(false);
       setToast(loadedPayload.validationWarnings?.length ? `Проект открыт; найдено замечаний: ${loadedPayload.validationWarnings.length}` : `Открыт проект: ${file.name}`);
     } catch (error) {
-      setToast(error.message || "Не удалось открыть файл проекта");
+      setToast(explainUserError(error, { action: "Не удалось открыть файл проекта", next: "выберите корректный файл .familytree или резервную копию" }));
     } finally {
       event.target.value = "";
     }
@@ -1498,7 +1595,7 @@ export function App() {
       setBackupOpen(false);
       setToast(payload.validationWarnings?.length ? `Резервная копия восстановлена; найдено замечаний: ${payload.validationWarnings.length}` : "Резервная копия восстановлена");
     } catch (error) {
-      setToast(error.message || "Не удалось восстановить резервную копию");
+      setToast(explainUserError(error, { action: "Не удалось восстановить резервную копию", next: "выберите другую копию и повторите восстановление" }));
     }
   };
   const downloadBackup = (backup) => downloadProjectFile(backup.payload, `резервная-копия-${backup.createdAt.slice(0, 10)}.familytree`);
@@ -1527,7 +1624,7 @@ export function App() {
       if (saveChanges) saveForContinuation();
       else setDirty(false);
     } catch (error) {
-      setToast(error.message || "Не удалось сохранить изменения");
+      setToast(explainUserError(error, { action: "Не удалось сохранить изменения", next: "проверьте свободное место и повторите действие" }));
       return;
     }
     if (action?.type === "open") openProject(true);
@@ -1607,16 +1704,17 @@ export function App() {
            <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
-      <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}><TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека") } /><aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}><div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} /><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside></main>
+      <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}><TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека") } /><aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}><div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} /><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside></main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
-       {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> {toast}</div>}
+       {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
        {backupOpen && <BackupModal backups={backups} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
        {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onClose={() => setViewSettingsOpen(false)} />}
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
        {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
+       {relationshipDeleteConfirm && <ConfirmModal title="Удалить связь?" description={`${relationshipDeleteConfirm.label}. Связь будет убрана из дерева, а перед этим будет создана резервная копия. После удаления можно сразу отменить действие.`} confirmLabel="Удалить связь" onClose={() => setRelationshipDeleteConfirm(null)} onConfirm={deleteRelationship} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
        {pendingUnsavedAction && <UnsavedChangesModal onSave={() => continueAfterUnsavedChoice(true)} onDiscard={() => continueAfterUnsavedChoice(false)} onCancel={() => setPendingUnsavedAction(null)} />}
        {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
