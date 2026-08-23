@@ -101,6 +101,12 @@ function describeUpdateError(error) {
     .replace(/https?:\/\/[^\s)]+/g, "ссылка на сервер обновлений");
 }
 
+function getAppIconPath() {
+  const packagedIcon = path.join(process.resourcesPath, "family-circle.ico");
+  const developmentIcon = path.join(__dirname, "..", "build-resources", "family-circle.ico");
+  return fs.existsSync(packagedIcon) ? packagedIcon : developmentIcon;
+}
+
 function configureUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -152,6 +158,7 @@ function createWindow(port) {
     backgroundColor: "#f7f5ee",
     autoHideMenuBar: true,
     title: "Семейное древо",
+    icon: getAppIconPath(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -221,7 +228,7 @@ if (!hasSingleInstance) {
     return true;
   });
   ipcMain.handle("family-tree-update-install", () => {
-    autoUpdater.quitAndInstall();
+    autoUpdater.quitAndInstall(true, true);
     return true;
   });
   ipcMain.handle("family-tree-open-releases", async () => {

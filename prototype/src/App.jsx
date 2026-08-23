@@ -923,7 +923,7 @@ function UpdateModal({ status, onClose, onDownload, onInstall, onOpenReleases })
   const downloading = status.state === "downloading";
   const title = downloaded ? "Обновление готово" : downloading ? "Скачиваем обновление" : "Доступна новая версия";
   const description = downloaded
-    ? "Новая версия уже загружена. Перезапустите приложение, чтобы установить её."
+    ? "Новая версия уже загружена. После нажатия приложение тихо установит её и перезапустится."
     : downloading
       ? "Приложение скачивает обновление с GitHub. Дерево можно оставить открытым."
       : "Для приложения вышла новая версия с исправлениями и улучшениями.";
@@ -940,7 +940,7 @@ function UpdateModal({ status, onClose, onDownload, onInstall, onOpenReleases })
         <div className="update-actions">
           <button type="button" className="button button-ghost" onClick={onOpenReleases}>Страница релиза</button>
           {!downloaded && <button type="button" className="button button-primary" onClick={onDownload} disabled={downloading}>{downloading ? "Скачивание…" : "Скачать обновление"}</button>}
-          {downloaded && <button type="button" className="button button-primary" onClick={onInstall}>Перезапустить и обновить</button>}
+          {downloaded && <button type="button" className="button button-primary" onClick={onInstall}>Установить и перезапустить</button>}
         </div>
       </section>
     </div>

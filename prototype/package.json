@@ -1,6 +1,6 @@
 {
   "name": "family-tree-desktop",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -48,6 +48,12 @@
       "dist/client/**/*",
       "electron/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build-resources/family-circle.ico",
+        "to": "family-circle.ico"
+      }
     ],
     "asar": true,
     "win": {
