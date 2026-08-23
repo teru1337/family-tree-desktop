@@ -55,6 +55,7 @@ import { createRenderIndex, visibleEdges } from "./render-index.js";
 import { runBackgroundExport } from "./export-worker-client.js";
 import { calculateRelationship, personLabel } from "./relationship-calculator.js";
 import { explainUserError } from "./ui-feedback.js";
+import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -869,7 +870,7 @@ const instructionSteps = [
   { image: "04-tree.svg", source: "source-04-tree.jpg", title: "Смотреть дерево и перемещаться по полотну", text: "Дерево можно рассматривать как большое полотно: двигайте пустое место зажатой ЛКМ, меняйте масштаб и перетаскивайте карточки внутри своего поколения.", tips: ["Стрелки слева перемещают полотно небольшими шагами.", "Карточка не может наехать на соседнюю.", "Если потянуть её в другое поколение, она вернётся на свою строку."] },
   { image: "05-search.svg", source: "source-05-search.jpg", title: "Найти человека и показать его на карте", text: "Введите часть имени в строку поиска. После выбора записи правая панель покажет сведения, семейный статус, роли и ID связей.", tips: ["Нажмите «Показать найденного человека на карте», чтобы центрировать дерево.", "Нажатие на родственника в правой панели открывает его карточку.", "Панель можно закрыть крестиком и открыть снова кнопкой на полотне."] },
   { image: "06-relationships.svg", source: "source-06-relationships.jpg", title: "Управлять связями и удалять ошибочные записи", text: "Кнопка «Управлять связями» добавляет родство, брак, партнёрство или развод между уже существующими людьми.", tips: ["Степ-родство используется для отчима, мачехи, пасынка и падчерицы.", "Каждая связь получает отдельный ID.", "Удаление человека требует подтверждения и создаёт защитную копию."] },
-  { image: "07-backups.svg", source: "source-07-backups.jpg", title: "Резервные копии и восстановление", text: "Приложение автоматически сохраняет локальные копии. Через меню «•••» можно открыть список, скачать копию или восстановить состояние дерева.", tips: ["Копии хранятся на этом компьютере.", "Перед важными действиями создаются дополнительные защитные копии.", "Для надёжности периодически скачивайте проект на внешний носитель."] },
+  { image: "07-backups.svg", source: "source-07-backups.jpg", title: "Копии, архив и восстановление", text: "Приложение автоматически сохраняет локальные копии. Через меню «•••» можно открыть список копий или создать полный архив материалов для переноса.", tips: ["Копии хранятся на этом компьютере.", "Архив .familyarchive включает людей, фотографии, биографии, связи и источники.", "Перед восстановлением архива приложение проверяет его содержимое."] },
   { image: "08-export-settings.svg", source: "source-08-export-settings.jpg", title: "Экспорт и настройки", text: "Кнопка «Экспорт» подготавливает файлы для альбома, типографии и печати. Настройки проекта находятся в меню и сохраняются локально.", tips: ["PNG подходит для семейного альбома.", "TIFF подходит для типографии.", "PDF можно сделать плакатом или разбить на листы."] },
 ];
 
@@ -927,6 +928,30 @@ function BackupModal({ backups, projectMeta, lastSavedAt, lastBackupAt, onClose,
         {verification && <div className={`backup-verification ${verification.report.valid ? "backup-verification-valid" : "backup-verification-invalid"}`} role="status"><div className="backup-verification-copy"><strong>{verification.report.valid ? "Копия прошла проверку" : "Копия не прошла проверку"}</strong><span>{verification.report.valid ? `Людей: ${verification.report.peopleCount} · связей: ${verification.report.relationCount}${verification.report.warnings.length ? ` · замечаний: ${verification.report.warnings.length}` : ""}` : verification.report.error}</span>{verification.report.valid && verification.report.warnings.length > 0 && <small>{verification.report.warnings.slice(0, 2).join(" ")}</small>}</div><div className="backup-verification-actions"><button type="button" className="button button-ghost" onClick={() => setVerification(null)}>Отмена</button>{verification.report.valid && <button type="button" className="button button-primary" onClick={restoreVerifiedBackup}>Восстановить проверенную копию</button>}</div></div>}
         {backups.length === 0 ? <div className="backup-empty"><ClockCounterClockwise size={32} /><strong>Автоматических копий пока нет</strong><span>После изменения данных копия появится здесь автоматически.</span></div> : <div className="backup-list">{backups.map((backup) => <article className="backup-item" key={backup.id}><div className="backup-item-icon"><ClockCounterClockwise size={19} /></div><div className="backup-meta"><strong>{formatDateTime(backup.createdAt)}</strong><span>{reasonLabels[backup.reason] || "Резервная копия"} · людей: {backup.peopleCount}</span></div><div className="backup-actions"><button type="button" className="button button-ghost" onClick={() => onDownload(backup)}><DownloadSimple size={17} /> Скачать</button><button type="button" className="button button-secondary" onClick={() => verifySelectedBackup(backup)}>Проверить и восстановить</button></div></article>)}</div>}
         <div className="backup-note"><Info size={16} /> Для защиты от потери данных периодически скачивайте файл проекта на внешний диск или флешку. Восстановление не изменится, пока вы не подтвердите проверенную копию.</div>
+      </section>
+    </div>
+  );
+}
+
+function ArchiveModal({ payload, importState, onClose, onDownload, onImport, onRestoreImport, onClearImport }) {
+  const inputRef = useRef(null);
+  const archive = useMemo(() => createFamilyArchive(payload), [payload]);
+  const contents = archive.contents;
+  const report = importState?.report;
+  return (
+    <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="backup-modal archive-modal" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title" onClick={(event) => event.stopPropagation()}>
+        <div className="backup-modal-header"><div><span className="eyebrow">Локальные семейные материалы</span><h2 id="archive-modal-title">Архив семейных материалов</h2><p>Один файл с проектом, фотографиями, биографиями, связями и источниками.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть архив материалов"><X size={21} /></button></div>
+        <div className="archive-summary" aria-label="Состав текущего архива">
+          <div><strong>{contents.people}</strong><span>людей</span></div>
+          <div><strong>{contents.relations}</strong><span>связей</span></div>
+          <div><strong>{contents.photos}</strong><span>фотографий</span></div>
+          <div><strong>{contents.biographies}</strong><span>биографий</span></div>
+          <div><strong>{contents.sources}</strong><span>источников</span></div>
+        </div>
+        <div className="archive-actions"><button type="button" className="button button-primary" onClick={onDownload}><DownloadSimple size={18} /> Скачать полный архив</button><button type="button" className="button button-secondary" onClick={() => inputRef.current?.click()}><FolderOpen size={18} /> Загрузить архив</button><input ref={inputRef} className="visually-hidden" type="file" accept=".familyarchive,application/json" onChange={onImport} /></div>
+        <div className="archive-note"><Info size={16} /> Архив хранится только на выбранном компьютере. Его можно скопировать на внешний диск или флешку и восстановить в этом приложении.</div>
+        {importState && <div className={`archive-verification ${report?.valid ? "archive-verification-valid" : "archive-verification-invalid"}`} role="status"><div className="backup-verification-copy"><strong>{report?.valid ? "Архив прошёл проверку" : "Архив не прошёл проверку"}</strong><span>{importState.fileName}{report?.valid ? ` · людей: ${report.contents.people} · связей: ${report.contents.relations} · фото: ${report.contents.photos}` : ` · ${report?.error || "Файл повреждён."}`}</span>{report?.valid && report.warnings.length > 0 && <small>{report.warnings.slice(0, 2).join(" ")}</small>}</div><div className="backup-verification-actions"><button type="button" className="button button-ghost" onClick={onClearImport}>Отмена</button>{report?.valid && <button type="button" className="button button-primary" onClick={() => onRestoreImport(report.payload)}>Восстановить архив</button>}</div></div>}
       </section>
     </div>
   );
@@ -1166,6 +1191,8 @@ export function App() {
   const [lastBackupAt, setLastBackupAt] = useState(() => readBackups()[0]?.createdAt || null);
   const [backups, setBackups] = useState(() => readBackups());
   const [backupOpen, setBackupOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveImport, setArchiveImport] = useState(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [instructionOpen, setInstructionOpen] = useState(false);
@@ -1315,6 +1342,7 @@ export function App() {
         else if (instructionOpen) closeInstruction();
         else if (settingsOpen) closeSettings();
         else if (backupOpen) setBackupOpen(false);
+        else if (archiveOpen) { setArchiveOpen(false); setArchiveImport(null); }
         else if (viewSettingsOpen) setViewSettingsOpen(false);
         else if (filtersOpen) setFiltersOpen(false);
         else if (moreOpen) setMoreOpen(false);
@@ -1361,7 +1389,7 @@ export function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [historyStatus, updateOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
+  }, [historyStatus, updateOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -1686,6 +1714,69 @@ export function App() {
     setLastBackupAt(backup?.createdAt || null);
     setToast("Копия проекта подготовлена");
   };
+  const saveFamilyArchive = async () => {
+    const archive = createFamilyArchive(buildPayload());
+    const baseName = String(projectMeta.fileName || "семейное-древо.familytree").replace(/\.familytree$/i, "") || "семейное-древо";
+    const suggestedName = `${baseName}.familyarchive`;
+    try {
+      const saveWithDesktop = window.familyTreeDesktop?.saveProjectFile;
+      if (saveWithDesktop) {
+        const result = await saveWithDesktop(archive, suggestedName, "", "archive");
+        if (result?.canceled) {
+          setToast("Сохранение архива отменено");
+          return;
+        }
+      } else {
+        downloadProjectFile(archive, suggestedName);
+      }
+      setToast("Полный архив семейных материалов подготовлен");
+    } catch (error) {
+      setToast(explainUserError(error, { action: "Не удалось сохранить архив", next: "проверьте доступ к папке и повторите" }));
+    }
+  };
+  const handleArchiveSelected = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const report = verifyFamilyArchive(JSON.parse(await file.text()));
+      setArchiveImport({ fileName: file.name, report });
+      if (!report.valid) setToast("Архив не прошёл проверку и не будет восстановлен");
+    } catch (error) {
+      setArchiveImport({ fileName: file.name, report: { valid: false, contents: { people: 0, relations: 0, photos: 0 }, warnings: [], error: String(error?.message || "Не удалось прочитать архив.") } });
+      setToast("Не удалось прочитать архив");
+    } finally {
+      event.target.value = "";
+    }
+  };
+  const restoreFamilyArchive = (payload) => {
+    try {
+      const currentBackup = addBackup(buildPayload(), "before-restore");
+      const restoredPayload = normalizeProject(payload);
+      writeWorkingCopy(restoredPayload);
+      const restoredSettings = { ...defaultProjectSettings, ...(restoredPayload.project.settings || {}) };
+      const nextProjectMeta = { ...restoredPayload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" };
+      setPeople(restoredPayload.people);
+      setPartnerships(restoredPayload.partnerships || []);
+      setProjectMeta(nextProjectMeta);
+      setTreeStyle(restoredSettings.treeStyle || "classic");
+      setShowPhotos(restoredSettings.showPhotos !== false);
+      setAutoSaveEnabled(restoredSettings.autoSave !== false);
+      setSelectedId(restoredPayload.people.find((person) => person.id === "ivan")?.id || restoredPayload.people[0]?.id || "");
+      resetHistory(restoredPayload.people, restoredPayload.partnerships || [], nextProjectMeta);
+      setEditing(false);
+      setDraft(null);
+      setLastSavedAt(restoredPayload.manifest.updatedAt);
+      setLastBackupAt(currentBackup?.createdAt || lastBackupAt);
+      setBackups(readBackups());
+      setDirty(false);
+      setArchiveImport(null);
+      setArchiveOpen(false);
+      setMainMenuOpen(false);
+      setToast(restoredPayload.validationWarnings?.length ? `Архив восстановлен; найдено замечаний: ${restoredPayload.validationWarnings.length}` : "Архив семейных материалов восстановлен");
+    } catch (error) {
+      setToast(explainUserError(error, { action: "Не удалось восстановить архив", next: "выберите другой архив и повторите восстановление" }));
+    }
+  };
   const openProject = (skipPrompt = false) => {
     if (!skipPrompt && dirty) {
       setMainMenuOpen(false);
@@ -1870,7 +1961,7 @@ export function App() {
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
            <button type="button" className="header-action" onClick={() => openExport("print")}><Printer size={20} /> Печать</button>
-           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => openRelationshipCalculator()} disabled={people.length < 2}><UsersThree size={16} /> Узнать родство</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
+           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setArchiveImport(null); setArchiveOpen(true); }}><Copy size={16} /> Архив материалов</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => openRelationshipCalculator()} disabled={people.length < 2}><UsersThree size={16} /> Узнать родство</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
        <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}>
@@ -1885,6 +1976,7 @@ export function App() {
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
        {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
        {backupOpen && <BackupModal backups={backups} projectMeta={projectMeta} lastSavedAt={lastSavedAt} lastBackupAt={lastBackupAt} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
+       {archiveOpen && <ArchiveModal payload={buildPayload()} importState={archiveImport} onClose={() => { setArchiveOpen(false); setArchiveImport(null); }} onDownload={saveFamilyArchive} onImport={handleArchiveSelected} onRestoreImport={restoreFamilyArchive} onClearImport={() => setArchiveImport(null)} />}
        {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onClose={() => setViewSettingsOpen(false)} />}
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} onClose={() => setExportModalOpen(false)} onToast={setToast} />}

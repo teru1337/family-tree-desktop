@@ -195,14 +195,18 @@ if (!hasSingleInstance) {
   });
   ipcMain.handle("family-tree-version", () => app.getVersion());
   ipcMain.handle("family-tree-save-project-file", async (_event, request = {}) => {
+    const isArchive = request.kind === "archive";
     const suggestedName = path.basename(String(request.suggestedName || "семейное-древо.familytree"));
     let filePath = String(request.filePath || "");
     if (!path.isAbsolute(filePath)) filePath = "";
     if (!filePath) {
       const result = await dialog.showSaveDialog(mainWindow, {
-        title: "Сохранить семейное древо",
+        title: isArchive ? "Сохранить архив семейных материалов" : "Сохранить семейное древо",
         defaultPath: path.join(app.getPath("documents"), suggestedName),
-        filters: [{ name: "Файл семейного древа", extensions: ["familytree"] }, { name: "Все файлы", extensions: ["*"] }],
+        filters: [
+          { name: isArchive ? "Архив семейных материалов" : "Файл семейного древа", extensions: [isArchive ? "familyarchive" : "familytree"] },
+          { name: "Все файлы", extensions: ["*"] },
+        ],
       });
       if (result.canceled || !result.filePath) return { canceled: true };
       filePath = result.filePath;

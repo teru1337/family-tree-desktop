@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld("familyTreeDesktop", {
   close: () => ipcRenderer.send("family-tree-close"),
   getVersion: () => ipcRenderer.invoke("family-tree-version"),
   checkForUpdates: () => ipcRenderer.invoke("family-tree-update-check"),
-  saveProjectFile: (payload, suggestedName, filePath = "") => ipcRenderer.invoke("family-tree-save-project-file", { payload, suggestedName, filePath }),
+  saveProjectFile: (payload, suggestedName, filePath = "", kind = "project") => ipcRenderer.invoke("family-tree-save-project-file", { payload, suggestedName, filePath, kind }),
   downloadUpdate: () => ipcRenderer.invoke("family-tree-update-download"),
   installUpdate: () => ipcRenderer.invoke("family-tree-update-install"),
   openReleases: () => ipcRenderer.invoke("family-tree-open-releases"),
