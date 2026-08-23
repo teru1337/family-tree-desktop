@@ -4,6 +4,7 @@ import {
   Camera,
   ArrowClockwise,
   ArrowCounterClockwise,
+  ArrowsOut,
   CaretDown,
   CaretLeft,
   CaretRight,
@@ -15,6 +16,7 @@ import {
   DownloadSimple,
   Export,
   FloppyDisk,
+  Funnel,
   FolderOpen,
   Info,
   ClockCounterClockwise,
@@ -47,6 +49,7 @@ import {
 } from "./storage.js";
 import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate, validateDateRecord } from "./dates.js";
 import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
+import { DEFAULT_SEARCH_FILTERS, filterPeople } from "./search.js";
 import {
   EXPORT_QUALITY,
   PAPER_SIZES,
@@ -213,6 +216,18 @@ function SearchResults({ results, onSelect }) {
   return <div className="search-results">{results.map((person) => <button key={person.id} type="button" className="search-result" onClick={() => onSelect(person.id)}><PersonAvatar person={person} /><span><strong>{personDisplayName(person)}</strong><small>{person.place || "место не указано"}</small></span></button>)}</div>;
 }
 
+function SearchFilterPanel({ filters, generations, onChange, onReset }) {
+  return (
+    <div className="search-filters" role="dialog" aria-label="Фильтры поиска" onClick={(event) => event.stopPropagation()}>
+      <div className="search-filter-heading"><strong>Фильтры поиска</strong><button type="button" className="filter-reset" onClick={onReset}>Сбросить</button></div>
+      <label><span>Поколение</span><select value={filters.generation} onChange={(event) => onChange("generation", event.target.value)}><option value="all">Любое поколение</option>{generations.map((generation) => <option key={generation.index} value={String(generation.index)}>Поколение {generation.index + 1}</option>)}</select></label>
+      <label><span>Тип связи</span><select value={filters.relation} onChange={(event) => onChange("relation", event.target.value)}><option value="all">Любая связь</option><option value="parent">Есть родительская связь</option><option value="child">Есть связь с ребёнком</option><option value="partner">Есть супруг или партнёр</option><option value="sibling">Есть связь брат/сестра</option><option value="biological">Биологическая</option><option value="adoptive">Усыновление</option><option value="guardian">Опекунство</option><option value="step">Степ- или сводное родство</option><option value="unknown">Неизвестный тип связи</option></select></label>
+      <div className="search-filter-range"><label><span>Год от</span><input inputMode="numeric" value={filters.yearFrom} onChange={(event) => onChange("yearFrom", event.target.value.replace(/[^0-9]/g, "").slice(0, 4))} placeholder="1900" /></label><label><span>Год до</span><input inputMode="numeric" value={filters.yearTo} onChange={(event) => onChange("yearTo", event.target.value.replace(/[^0-9]/g, "").slice(0, 4))} placeholder="2026" /></label></div>
+      <label><span>Место рождения</span><input value={filters.place} onChange={(event) => onChange("place", event.target.value)} placeholder="Например, Новосибирск" /></label>
+    </div>
+  );
+}
+
 function RelationSection({ title, items, onSelect, emptyText }) {
   return <section className="relation-section"><div className="section-title-row"><h3>{title}</h3><PencilSimple size={15} /></div>{items.length ? items.map(({ person, meta, relationshipId }) => <RelationshipItem key={`${person.id}-${relationshipId || title}`} person={person} meta={meta} relationshipId={relationshipId} onSelect={onSelect} />) : <p className="empty-relation">{emptyText}</p>}</section>;
 }
@@ -308,11 +323,11 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
     reader.onerror = () => setErrors((current) => ({ ...current, image: "Не удалось прочитать фотографию. Попробуйте другой файл." }));
     reader.readAsDataURL(file);
   };
-  const handleSave = () => {
+  const handleSave = (addAnother = false) => {
     const nextErrors = validatePersonDraft(draft, { isNew, relationshipMode, connectionTargetId });
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
-    onSave();
+    onSave({ addAnother });
   };
   const handleNext = () => {
     if (wizardStep === 1) {
@@ -355,7 +370,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         </>}
       </div>}
       {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{draft.isUnknown ? "Неизвестный человек" : personDisplayName(draft)}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
-      <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button>{isNew && wizardStep > 1 && <button type="button" className="button button-secondary" onClick={handleBack}>Назад</button>}{isNew && wizardStep < 3 && <button type="button" className="button button-primary save-button" onClick={handleNext} disabled={wizardStep === 1 && Boolean(relationshipMode) && !connectionTargetId}>{wizardStep === 1 ? "К сведениям" : "К проверке"}</button>}{(!isNew || wizardStep === 3) && <button type="button" className="button button-primary save-button" onClick={handleSave}><FloppyDisk size={18} weight="bold" /> {isNew ? "Добавить человека" : "Сохранить"}</button>}</div>
+      <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button>{isNew && wizardStep > 1 && <button type="button" className="button button-secondary" onClick={handleBack}>Назад</button>}{isNew && wizardStep < 3 && <button type="button" className="button button-primary save-button" onClick={handleNext} disabled={wizardStep === 1 && Boolean(relationshipMode) && !connectionTargetId}>{wizardStep === 1 ? "К сведениям" : "К проверке"}</button>}{isNew && wizardStep === 3 && <button type="button" className="button button-secondary add-another-button" onClick={() => handleSave(true)}><UserPlus size={17} /> Сохранить и добавить ещё одного</button>}{(!isNew || wizardStep === 3) && <button type="button" className="button button-primary save-button" onClick={() => handleSave(false)}><FloppyDisk size={18} weight="bold" /> {isNew ? "Добавить человека" : "Сохранить"}</button>}</div>
     </div>
   );
 }
@@ -457,7 +472,7 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
   return <svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const from = positions[parent.id]; const to = positions[child.id]; const startX = from.left + from.width / 2; const startY = from.top + from.height; const endX = to.left + to.width / 2; const endY = to.top; const middleY = startY + Math.max(24, (endY - startY) / 2); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""}`} d={`M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const a = positions[first.id]; const b = positions[second.id]; const start = a.left < b.left ? a : b; const end = a.left < b.left ? b : a; const startX = start.left + start.width; const startY = start.top + start.height / 2; const endX = end.left; const endY = end.top + end.height / 2; const middleX = startX + Math.max(18, (endX - startX) / 2); const label = partnership.status === "divorced" ? "Развод" : partnershipTypeLabel[partnership.type] || "Связь"; return <g key={partnership.id}><path className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""}`} d={`M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}`} /><text className="partnership-label" x={middleX} y={Math.min(startY, endY) - 8} textAnchor="middle">{label}</text></g>; })}</g></svg>;
 }
 
-function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, focusRequest, inspectorOpen, onToggleInspector }) {
+function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, focusRequest, inspectorOpen, onToggleInspector, onFocusSelected }) {
   const dragRef = useRef(null);
   const personDragRef = useRef(null);
   const viewportRef = useRef(null);
@@ -499,16 +514,30 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
   }, [layout.positions]);
-  const getPanBounds = () => {
+  const getPanBounds = (forZoom = zoom) => {
     const viewport = viewportRef.current;
     if (!viewport) return { minX: -900, maxX: 900, minY: -650, maxY: 650 };
     const edgePadding = 24;
-    const boardRight = viewport.clientWidth - layout.width * zoom - edgePadding;
-    const boardBottom = viewport.clientHeight - layout.height * zoom - edgePadding;
+    const boardRight = viewport.clientWidth - layout.width * forZoom - edgePadding;
+    const boardBottom = viewport.clientHeight - layout.height * forZoom - edgePadding;
     return { minX: Math.min(edgePadding, boardRight), maxX: Math.max(edgePadding, boardRight), minY: Math.min(edgePadding, boardBottom), maxY: Math.max(edgePadding, boardBottom) };
   };
-  const clampPan = (value) => { const bounds = getPanBounds(); return { x: Math.max(bounds.minX, Math.min(bounds.maxX, value.x)), y: Math.max(bounds.minY, Math.min(bounds.maxY, value.y)) }; };
+  const clampPan = (value, forZoom = zoom) => { const bounds = getPanBounds(forZoom); return { x: Math.max(bounds.minX, Math.min(bounds.maxX, value.x)), y: Math.max(bounds.minY, Math.min(bounds.maxY, value.y)) }; };
   const movePan = (x, y) => onPanChange(clampPan({ x: pan.x + x, y: pan.y + y }));
+  const centerView = () => {
+    const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
+    const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
+    if (!width || !height) return;
+    onPanChange(clampPan({ x: (width - layout.width * zoom) / 2, y: (height - layout.height * zoom) / 2 }));
+  };
+  const fitAll = () => {
+    const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
+    const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
+    if (!width || !height) return;
+    const nextZoom = Math.max(0.55, Math.min(1.35, Math.min((width - 48) / layout.width, (height - 48) / layout.height)));
+    onZoomChange(nextZoom);
+    onPanChange(clampPan({ x: (width - layout.width * nextZoom) / 2, y: (height - layout.height * nextZoom) / 2 }, nextZoom));
+  };
   const onPointerDown = (event) => {
     if (event.button !== 0 || event.target.closest("button")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -595,7 +624,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const styleLabel = treeStyle === "album" ? "Семейный альбом" : treeStyle === "minimal" ? "Сдержанный" : "Классический";
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
-      <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><IconButton label="По центру" className="center-control" onClick={() => { onPanChange({ x: 0, y: 0 }); onZoomChange(1); }}><Crosshair size={20} /></IconButton>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
+      <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
       <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
@@ -919,6 +948,8 @@ export function App() {
   const [projectMeta, setProjectMeta] = useState({ ...sessionProject, settings: sessionSettings });
   const [selectedId, setSelectedId] = useState(sessionPeople.find((person) => person.id === "ivan")?.id || sessionPeople[0]?.id || "");
   const [query, setQuery] = useState("");
+  const [searchFilters, setSearchFilters] = useState({ ...DEFAULT_SEARCH_FILTERS });
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [focusRequest, setFocusRequest] = useState(null);
@@ -927,6 +958,7 @@ export function App() {
   const [showPhotos, setShowPhotos] = useState(sessionSettings.showPhotos !== false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(sessionSettings.autoSave !== false);
   const [editing, setEditing] = useState(false);
+  const [editorSessionKey, setEditorSessionKey] = useState(0);
   const [relationshipEditing, setRelationshipEditing] = useState(false);
   const [draft, setDraft] = useState(null);
   const [relationshipMode, setRelationshipMode] = useState("");
@@ -958,7 +990,8 @@ export function App() {
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
   if (!historyRef.current) historyRef.current = createHistory(createSnapshot(people, partnerships, projectMeta));
   const treeLayout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
-  const searchResults = useMemo(() => { const value = query.trim().toLocaleLowerCase("ru"); if (!value) return []; return people.filter((person) => `${personDisplayName(person)} ${person.place || ""} ${person.year || ""}`.toLocaleLowerCase("ru").includes(value)).slice(0, 6); }, [people, query]);
+  const hasActiveSearch = query.trim() || searchFilters.generation !== "all" || searchFilters.relation !== "all" || searchFilters.yearFrom || searchFilters.yearTo || searchFilters.place.trim();
+  const searchResults = useMemo(() => filterPeople(people, partnerships, treeLayout.positions, query, searchFilters), [people, partnerships, query, searchFilters, treeLayout.positions]);
   const applyHistorySnapshot = (snapshot) => {
     setPeople(snapshot.people);
     setPartnerships(snapshot.partnerships);
@@ -1123,9 +1156,9 @@ export function App() {
     }
     window.open("https://github.com/teru1337/family-tree-desktop/releases", "_blank", "noopener,noreferrer");
   };
-  const selectPerson = (id) => { setSelectedId(id); setQuery(""); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
+  const selectPerson = (id) => { setSelectedId(id); setQuery(""); setFiltersOpen(false); setEditing(false); setRelationshipEditing(false); setInspectorOpen(true); };
   const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person) return; setSelectedId(id); setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${personDisplayName(person)}`); };
-  const openEditor = (person = null, relation = "") => { setDraft(person ? normalizePersonDate({ ...person }) : { ...blankPerson, id: "" }); setRelationshipMode(relation); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || ""); setRelationshipEditing(false); setInspectorOpen(true); setEditing(true); };
+  const openEditor = (person = null, relation = "") => { setEditorSessionKey((current) => current + 1); setDraft(person ? normalizePersonDate({ ...person }) : { ...blankPerson, id: "" }); setRelationshipMode(relation); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || ""); setRelationshipEditing(false); setInspectorOpen(true); setEditing(true); };
   const closeInspector = () => { setEditing(false); setRelationshipEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setInspectorOpen(false); };
   const requestDelete = (id) => { if (people.some((person) => person.id === id)) setDeleteConfirmId(id); };
   const deletePerson = () => {
@@ -1159,7 +1192,7 @@ export function App() {
     setDirty(true);
     setToast(`Удалён человек: ${personDisplayName(personToDelete)}`);
   };
-  const savePerson = () => {
+  const savePerson = ({ addAnother = false } = {}) => {
     const validationErrors = validatePersonDraft(draft, { isNew: !draft?.id, relationshipMode, connectionTargetId });
     if (Object.keys(validationErrors).length) { setToast("Проверьте заполненные поля"); return; }
     const normalizedName = draft.isUnknown ? "" : draft.name.trim() || "Человек без имени";
@@ -1196,10 +1229,22 @@ export function App() {
         return [...next, newPerson];
       });
       if (relationTarget && relationshipMode === "partner") setPartnerships((current) => [...current, { id: `partnership-${relationTarget.id}-${newId}`, personIds: [relationTarget.id, newId], type: partnershipType, status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown" }]);
-      setSelectedId(newId); setToast("Человек добавлен в дерево");
+      setSelectedId(newId);
+      if (addAnother) {
+        setEditorSessionKey((current) => current + 1);
+        setDraft({ ...blankPerson, id: "" });
+        setRelationshipMode("child");
+        setRelationshipType("biological");
+        setPartnershipType("marriage");
+        setConnectionTargetId(newId);
+        setEditing(true);
+        setRelationshipEditing(false);
+        setInspectorOpen(true);
+        setToast("Человек добавлен. Можно добавить следующего родственника.");
+      } else setToast("Человек добавлен в дерево");
     }
     setDirty(true);
-    setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId("");
+    if (!addAnother) { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }
   };
   const saveRelationship = ({ kind, targetId, parentType, startDate, startDatePrecision, endDate, endDatePrecision }) => {
     if (!selectedPerson || !targetId) return;
@@ -1444,7 +1489,7 @@ export function App() {
           <button type="button" className="button button-secondary file-button" onClick={openProject}><FolderOpen size={18} /> Открыть проект</button>
           <button type="button" className="button button-primary save-project-button" onClick={saveProject}><FloppyDisk size={18} weight="bold" /> Сохранить проект</button>
           <div className="history-actions" aria-label="История действий"><button type="button" className="icon-button history-button" onClick={undoAction} disabled={!historyStatus.canUndo} title="Отменить действие (Ctrl+Z)" aria-label="Отменить действие"><ArrowCounterClockwise size={20} /></button><button type="button" className="icon-button history-button" onClick={redoAction} disabled={!historyStatus.canRedo} title="Повторить действие (Ctrl+Y)" aria-label="Повторить действие"><ArrowClockwise size={20} /></button></div>
-          <div className="search-wrap"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по именам..." aria-label="Поиск по именам" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}{query && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
+          <div className="search-wrap"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по именам..." aria-label="Поиск по именам" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}<button className={`filter-button ${filtersOpen || hasActiveSearch && (searchFilters.generation !== "all" || searchFilters.relation !== "all" || searchFilters.yearFrom || searchFilters.yearTo || searchFilters.place) ? "filter-button-active" : ""}`} type="button" onClick={(event) => { event.stopPropagation(); setFiltersOpen((open) => !open); }} aria-label="Открыть фильтры поиска" title="Фильтры поиска"><Funnel size={17} /></button>{filtersOpen && <SearchFilterPanel filters={searchFilters} generations={treeLayout.generations} onChange={(field, value) => setSearchFilters((current) => ({ ...current, [field]: value }))} onReset={() => setSearchFilters({ ...DEFAULT_SEARCH_FILTERS })} />}{hasActiveSearch && !filtersOpen && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
          <div className="header-actions">
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
@@ -1452,7 +1497,7 @@ export function App() {
            <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
-      <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`}><TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} /><aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside></main>
+      <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`}><TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека") } /><aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside></main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
        {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> {toast}</div>}
