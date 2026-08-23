@@ -78,7 +78,7 @@ import {
 const initialPeople = [];
 
 const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
-const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, cardFields: [...DEFAULT_CARD_FIELDS] };
+const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
 
@@ -888,7 +888,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const styleLabel = treeStyle === "album" ? "Семейный альбом" : treeStyle === "minimal" ? "Сдержанный" : "Классический";
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
-      <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "nearby" ? "selected" : ""} onClick={() => onViewModeChange?.("nearby")} disabled={!selectedId}>Ближайшая семья</button></div>
+      <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "nearby" ? "selected" : ""} aria-pressed={viewMode === "nearby"} onClick={() => onViewModeChange?.("nearby")} disabled={!selectedId}>Ближайшая семья</button></div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
       <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} strictVisible={viewMode === "nearby"} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
@@ -1126,11 +1126,12 @@ function ViewSettingsModal({ treeStyle, showPhotos, cardFields, onTreeStyleChang
   );
 }
 
-function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, cardFields, onSave, onClose }) {
+function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, largeText, cardFields, onSave, onClose }) {
   const [title, setTitle] = useState(projectMeta.title || "Моё семейное древо");
   const [autoSave, setAutoSave] = useState(autoSaveEnabled);
   const [nextTreeStyle, setNextTreeStyle] = useState(treeStyle);
   const [nextShowPhotos, setNextShowPhotos] = useState(showPhotos);
+  const [nextLargeText, setNextLargeText] = useState(largeText);
   const [nextCardFields, setNextCardFields] = useState(sanitizeCardFields(cardFields));
   const [error, setError] = useState("");
   const styles = [{ value: "classic", title: "Классический", description: "Чёткие карточки и спокойные линии" }, { value: "album", title: "Семейный альбом", description: "Тёплая бумажная палитра и цветные фото" }, { value: "minimal", title: "Сдержанный", description: "Больше воздуха и меньше декоративных деталей" }];
@@ -1144,7 +1145,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
       setError("Название проекта содержит недопустимые символы.");
       return;
     }
-    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, cardFields: nextCardFields });
+    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, largeText: nextLargeText, cardFields: nextCardFields });
   };
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
@@ -1154,6 +1155,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
           <label className={`field settings-title-field ${error ? "has-error" : ""}`}><span>Название проекта</span><input value={title} onChange={(event) => { setTitle(event.target.value); setError(""); }} placeholder="Например, Семья Петровых" aria-invalid={Boolean(error)} />{error && <small className="field-error">{error}</small>}</label>
           <label className="view-toggle"><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /><span><strong>Автоматически сохранять изменения</strong><small>Локальная копия и резервная копия создаются после изменений.</small></span></label>
           <label className="view-toggle"><input type="checkbox" checked={nextShowPhotos} onChange={(event) => setNextShowPhotos(event.target.checked)} /><span><strong>Показывать фотографии</strong><small>Фото будут видны на карточках людей и в дереве.</small></span></label>
+          <label className="view-toggle accessibility-toggle"><input type="checkbox" checked={nextLargeText} onChange={(event) => setNextLargeText(event.target.checked)} /><span><strong>Крупный текст</strong><small>Увеличивает основные подписи, кнопки, карточки и сведения для более комфортного чтения.</small></span></label>
           <CardFieldsPicker cardFields={nextCardFields} onChange={setNextCardFields} />
           <div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${nextTreeStyle === style.value ? "selected" : ""}`} onClick={() => setNextTreeStyle(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div>
         </div>
@@ -1325,6 +1327,7 @@ export function App() {
   const [keyboardPanRequest, setKeyboardPanRequest] = useState(null);
   const [treeStyle, setTreeStyle] = useState(sessionSettings.treeStyle || "classic");
   const [showPhotos, setShowPhotos] = useState(sessionSettings.showPhotos !== false);
+  const [largeText, setLargeText] = useState(sessionSettings.largeText === true);
   const [cardFields, setCardFields] = useState(sessionSettings.cardFields);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(sessionSettings.autoSave !== false);
   const [editing, setEditing] = useState(false);
@@ -1373,7 +1376,7 @@ export function App() {
   const inspectorResizeRef = useRef(null);
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
   if (!historyRef.current) historyRef.current = createHistory(createSnapshot(people, partnerships, projectMeta));
-  const treeLayout = useMemo(() => buildTreeLayout(people, partnerships, { cardHeight: 92 + Math.max(0, sanitizeCardFields(cardFields).length - 1) * 14 }), [people, partnerships, cardFields]);
+  const treeLayout = useMemo(() => buildTreeLayout(people, partnerships, { cardWidth: largeText ? 220 : 190, cardHeight: (largeText ? 108 : 92) + Math.max(0, sanitizeCardFields(cardFields).length - 1) * (largeText ? 16 : 14) }), [people, partnerships, cardFields, largeText]);
   const deferredQuery = useDeferredValue(query);
   const hasActiveSearch = Boolean(query.trim() || Object.entries(searchFilters).some(([field, value]) => value && value !== DEFAULT_SEARCH_FILTERS[field]));
   const searchResults = useMemo(() => filterPeople(people, partnerships, treeLayout.positions, deferredQuery, searchFilters), [people, partnerships, deferredQuery, searchFilters, treeLayout.positions]);
@@ -1424,6 +1427,7 @@ export function App() {
     const settings = { ...defaultProjectSettings, ...(snapshot.projectMeta.settings || {}) };
     setTreeStyle(settings.treeStyle || "classic");
     setShowPhotos(settings.showPhotos !== false);
+    setLargeText(settings.largeText === true);
     setCardFields(sanitizeCardFields(settings.cardFields));
     setAutoSaveEnabled(settings.autoSave !== false);
     setSelectedId((current) => snapshot.people.some((person) => person.id === current) ? current : snapshot.people[0]?.id || "");
@@ -1460,10 +1464,10 @@ export function App() {
     if (field === "cardFields") setCardFields(nextValue);
     setDirty(true);
   };
-  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, cardFields: nextCardFields }) => {
+  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, largeText: nextLargeText, cardFields: nextCardFields }) => {
     const nextTitle = String(title || "").trim() || "Моё семейное древо";
     const normalizedCardFields = sanitizeCardFields(nextCardFields);
-    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, cardFields: normalizedCardFields } };
+    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, largeText: nextLargeText, cardFields: normalizedCardFields } };
     const payload = createProjectPayload(people, nextMeta, partnerships);
     try {
       writeWorkingCopy(payload);
@@ -1471,6 +1475,7 @@ export function App() {
       setAutoSaveEnabled(autoSave);
       setTreeStyle(nextTreeStyle);
       setShowPhotos(nextShowPhotos);
+      setLargeText(nextLargeText);
       setCardFields(normalizedCardFields);
       setLastSavedAt(payload.manifest.updatedAt);
       setDirty(false);
@@ -2000,6 +2005,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
+      setLargeText(restoredSettings.largeText === true);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
       const restoredSelectedId = restoredPayload.people.find((person) => person.id === "ivan")?.id || restoredPayload.people[0]?.id || "";
@@ -2049,6 +2055,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setTreeStyle(loadedSettings.treeStyle || "classic");
       setShowPhotos(loadedSettings.showPhotos !== false);
+      setLargeText(loadedSettings.largeText === true);
       setCardFields(sanitizeCardFields(loadedSettings.cardFields));
       setAutoSaveEnabled(loadedSettings.autoSave !== false);
       const loadedSelectedId = loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "";
@@ -2077,6 +2084,7 @@ export function App() {
       setProjectMeta({ ...payload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" });
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
+      setLargeText(restoredSettings.largeText === true);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
       const backupSelectedId = payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "";
@@ -2162,7 +2170,7 @@ export function App() {
     }
     setPeople([]);
     setPartnerships([]);
-    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, cardFields: [...cardFields] } });
+    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, largeText, cardFields: [...cardFields] } });
     setSelectedId("");
     resetPersonNavigation("");
     setTreeViewMode("full");
@@ -2199,7 +2207,7 @@ export function App() {
   };
 
   return (
-    <div className={`app-window ${inspectorResizing ? "is-resizing" : ""}`} onClick={() => { if (moreOpen) setMoreOpen(false); }}>
+    <div className={`app-window ${inspectorResizing ? "is-resizing" : ""} ${largeText ? "app-large-text" : ""}`} onClick={() => { if (moreOpen) setMoreOpen(false); }}>
       <div className="window-bar"><div className="window-title"><TreeStructure size={18} weight="fill" /><span>Семейное древо</span></div><div className="window-controls"><Minus size={15} /><Square size={12} /><X size={15} /></div></div>
        <header className="app-header" onClick={(event) => event.stopPropagation()}>
          <button type="button" className="brand brand-button" onClick={() => setMainMenuOpen(true)} aria-label="Открыть главное меню"><TreeStructure size={42} weight="fill" /><span>Семейное древо</span></button>
@@ -2226,14 +2234,14 @@ export function App() {
        </main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
-       {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
+       {toast && <div className="toast" role="status" aria-live="polite"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
        {backupOpen && <BackupModal backups={backups} projectMeta={projectMeta} lastSavedAt={lastSavedAt} lastBackupAt={lastBackupAt} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
        {archiveOpen && <ArchiveModal payload={buildPayload()} importState={archiveImport} onClose={() => { setArchiveOpen(false); setArchiveImport(null); }} onDownload={saveFamilyArchive} onImport={handleArchiveSelected} onRestoreImport={restoreFamilyArchive} onClearImport={() => setArchiveImport(null)} />}
        {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onCardFieldsChange={(value) => updateViewSetting("cardFields", value)} onClose={() => setViewSettingsOpen(false)} />}
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
        {relationshipCalculatorOpen && <RelationshipCalculatorModal people={people} partnerships={partnerships} initialSourceId={selectedId} onClose={() => setRelationshipCalculatorOpen(false)} onSelectPerson={selectPerson} onShowOnMap={focusPersonOnMap} />}
-       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
+       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} largeText={largeText} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
        {relationshipDeleteConfirm && <ConfirmModal title="Удалить связь?" description={`${relationshipDeleteConfirm.label}. Связь будет убрана из дерева, а перед этим будет создана резервная копия. После удаления можно сразу отменить действие.`} confirmLabel="Удалить связь" onClose={() => setRelationshipDeleteConfirm(null)} onConfirm={deleteRelationship} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
