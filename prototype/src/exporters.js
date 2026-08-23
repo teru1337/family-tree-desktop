@@ -10,6 +10,51 @@ export const PAPER_SIZES = {
   a2: { label: "A2", width: 1191, height: 1684 },
 };
 
+export function calculatePosterPlan(layout, { scale = 1 } = {}) {
+  const generations = Math.max(1, Number(layout?.generations?.length) || 1);
+  const safeScale = Math.max(1, Number(scale) || 1);
+  const sourceWidth = Math.max(1, Number(layout?.width) || 1);
+  const sourceHeight = Math.max(1, Number(layout?.height) || 1);
+  const contentWidth = Math.round(sourceWidth * safeScale);
+  const contentHeight = Math.round(sourceHeight * safeScale);
+  const generationAllowance = 2551 + Math.max(0, generations - 3) * 240;
+  const generationHeightAllowance = Math.round((850 + generations * 180) * safeScale);
+  const plannedHeight = Math.max(contentHeight, generationHeightAllowance);
+  const longSide = Math.max(generationAllowance, contentWidth, plannedHeight);
+  const ratio = contentWidth / plannedHeight;
+  const pixelWidth = contentWidth >= plannedHeight ? longSide : Math.round(longSide * ratio);
+  const pixelHeight = contentWidth >= plannedHeight ? Math.round(longSide / ratio) : longSide;
+  const pageWidth = Math.max(1200, Math.round(pixelWidth / 2));
+  const pageHeight = Math.max(900, Math.round(pixelHeight / 2));
+  return {
+    generations,
+    pixelWidth,
+    pixelHeight,
+    pageWidth,
+    pageHeight,
+    widthCm: Math.round(pageWidth * 2.54 / 72),
+    heightCm: Math.round(pageHeight * 2.54 / 72),
+    orientation: pageWidth >= pageHeight ? "landscape" : "portrait",
+  };
+}
+
+export function checkExportReadability({ format = "pdf", mode = "poster", scale = 1, fontScale = 1, peopleCount = 0 } = {}) {
+  const renderedFontPixels = 13 * Math.max(0.5, Number(scale) || 1) * Math.max(0.8, Number(fontScale) || 1);
+  const printablePoints = renderedFontPixels / 2;
+  const isRaster = format === "png";
+  const measuredSize = isRaster ? renderedFontPixels : printablePoints;
+  const minimumSize = isRaster ? 14 : 10;
+  const crowded = Number(peopleCount) > 300 && mode === "tiles";
+  const readable = measuredSize >= minimumSize && !crowded;
+  const level = readable ? "good" : measuredSize >= minimumSize * 0.8 && !crowded ? "warning" : "poor";
+  const message = crowded
+    ? "Для очень большого дерева лучше выбрать качество «Печать» или «Плакат»."
+    : readable
+      ? `Текст будет разборчивым: примерно ${isRaster ? `${Math.round(renderedFontPixels)} px` : `${printablePoints.toFixed(1)} pt`}.`
+      : `Масштаб мал для печати: примерно ${isRaster ? `${Math.round(renderedFontPixels)} px` : `${printablePoints.toFixed(1)} pt`}. Увеличьте качество или размер шрифта.`;
+  return { level, readable, renderedFontPixels, printablePoints, message };
+}
+
 const THEMES = {
   classic: { background: "#f8fafc", card: "#ffffff", border: "#d4dde8", line: "#8fa0b5", label: "#64748b", accent: "#355b93" },
   album: { background: "#f7f0e4", card: "#fffdf7", border: "#ddc4a5", line: "#b58f65", label: "#876d52", accent: "#8b5e3c" },
@@ -59,17 +104,19 @@ async function imageToDataUrl(source) {
   }
 }
 
-function edgePath(from, to) {
+function edgePath(from, to, connectionGap = 24) {
   const startX = from.left + from.width / 2;
   const startY = from.top + from.height;
   const endX = to.left + to.width / 2;
   const endY = to.top;
-  const middleY = startY + Math.max(24, (endY - startY) / 2);
+  const middleY = startY + Math.max(connectionGap, (endY - startY) / 2);
   return `M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`;
 }
 
-export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true }) {
+export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true, fontScale = 1, connectionGap = 24 }) {
   const theme = THEMES[treeStyle] || THEMES.classic;
+  const safeFontScale = Math.max(0.8, Number(fontScale) || 1);
+  const safeConnectionGap = Math.max(18, Number(connectionGap) || 24);
   const byId = new Map(people.map((person) => [person.id, person]));
   const imageMap = new Map();
   if (showPhotos) {
@@ -90,7 +137,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
   })).filter(({ first, second }) => first && second && layout.positions[first.id] && layout.positions[second.id]);
 
   const connectionMarkup = parentEdges.map(({ parent, child, type }) => {
-    const path = edgePath(layout.positions[parent.id], layout.positions[child.id]);
+    const path = edgePath(layout.positions[parent.id], layout.positions[child.id], safeConnectionGap);
     return `<path d="${path}" fill="none" stroke="${theme.line}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"${type === "adoptive" ? ' stroke-dasharray="7 6"' : ""} />`;
   }).join("");
 
@@ -103,13 +150,13 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
     const startY = start.top + start.height / 2;
     const endX = end.left;
     const endY = end.top + end.height / 2;
-    const middleX = startX + Math.max(18, (endX - startX) / 2);
+    const middleX = startX + Math.max(safeConnectionGap / 2, (endX - startX) / 2);
     const label = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : "Связь";
-    return `<path d="M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} /><text x="${middleX}" y="${Math.min(startY, endY) - 10}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="${theme.label}">${escapeXml(label)}</text>`;
+    return `<path d="M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} /><text x="${middleX}" y="${Math.min(startY, endY) - 10 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(label)}</text>`;
   }).join("");
 
   const generationTop = (layout.top ?? 78) - 38;
-  const generationMarkup = layout.generations.map((group) => `<text x="24" y="${generationTop + group.index * (layout.rowStep ?? 190)}" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" letter-spacing="0.8" fill="${theme.label}">ПОКОЛЕНИЕ ${group.index + 1}</text>`).join("");
+  const generationMarkup = layout.generations.map((group) => `<text x="24" y="${generationTop + group.index * (layout.rowStep ?? 190)}" font-family="Segoe UI, Arial, sans-serif" font-size="${12 * safeFontScale}" font-weight="600" letter-spacing="0.8" fill="${theme.label}">ПОКОЛЕНИЕ ${group.index + 1}</text>`).join("");
   const nodeMarkup = people.map((person) => {
     const position = layout.positions[person.id];
     if (!position) return "";
@@ -118,9 +165,9 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
     const imageMarkup = photo
       ? `<image href="${escapeXml(photo)}" x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" preserveAspectRatio="xMidYMid slice" clip-path="url(#photo-clip-${escapeXml(person.id)})" />`
       : `<circle cx="${position.left + 37}" cy="${position.top + 45}" r="22" fill="${theme.background}" stroke="${theme.border}" /><text x="${position.left + 37}" y="${position.top + 50}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="${theme.accent}">?</text>`;
-    const nameMarkup = names.map((name, index) => `<text x="${position.left + 74}" y="${position.top + 34 + index * 17}" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#293241">${escapeXml(name)}</text>`).join("");
+    const nameMarkup = names.map((name, index) => `<text x="${position.left + 74}" y="${position.top + 34 + index * 17 * safeFontScale}" font-family="Segoe UI, Arial, sans-serif" font-size="${13 * safeFontScale}" font-weight="600" fill="#293241">${escapeXml(name)}</text>`).join("");
     const year = person.year || "дата неизвестна";
-    return `<g data-person-id="${escapeXml(person.id)}"><rect x="${position.left}" y="${position.top}" width="${position.width}" height="${position.height}" rx="9" fill="${theme.card}" stroke="${theme.border}" stroke-width="1.5" /><rect x="${position.left + 1}" y="${position.top + 1}" width="5" height="${position.height - 2}" rx="4" fill="${theme.accent}" opacity="0.8" /><clipPath id="photo-clip-${escapeXml(person.id)}"><rect x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" rx="7" /></clipPath>${imageMarkup}${nameMarkup}<text x="${position.left + 74}" y="${position.top + 69}" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="${theme.label}">${escapeXml(truncate(year, 22))}</text></g>`;
+    return `<g data-person-id="${escapeXml(person.id)}"><rect x="${position.left}" y="${position.top}" width="${position.width}" height="${position.height}" rx="9" fill="${theme.card}" stroke="${theme.border}" stroke-width="1.5" /><rect x="${position.left + 1}" y="${position.top + 1}" width="5" height="${position.height - 2}" rx="4" fill="${theme.accent}" opacity="0.8" /><clipPath id="photo-clip-${escapeXml(person.id)}"><rect x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" rx="7" /></clipPath>${imageMarkup}${nameMarkup}<text x="${position.left + 74}" y="${position.top + position.height - 23}" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(truncate(year, 22))}</text></g>`;
   }).join("");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}"><rect width="100%" height="100%" fill="${theme.background}" /><path d="M 0 66 H ${layout.width}" stroke="${theme.border}" stroke-width="1" opacity="0.65" />${generationMarkup}<g>${connectionMarkup}${partnershipMarkup}</g>${nodeMarkup}</svg>`;
@@ -135,8 +182,8 @@ function loadSvgImage(svg) {
   });
 }
 
-export async function renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, scale = 1 }) {
-  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos });
+export async function renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, scale = 1, fontScale = 1, connectionGap = 24 }) {
+  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, fontScale, connectionGap });
   const image = await loadSvgImage(svg);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(layout.width * scale));
@@ -264,11 +311,13 @@ function makeTileCanvas(source, x, y, width, height) {
   return canvas;
 }
 
-export async function buildPdfFromCanvas(canvas, { mode = "poster", paper = "a4", orientation = "landscape" } = {}) {
+export async function buildPdfFromCanvas(canvas, { mode = "poster", paper = "a4", orientation = "landscape", posterPlan = null } = {}) {
   if (mode === "poster") {
-    const longSide = 2551;
-    const pageWidth = orientation === "landscape" ? longSide : Math.round(longSide * canvas.height / canvas.width);
-    const pageHeight = orientation === "landscape" ? Math.round(longSide * canvas.height / canvas.width) : longSide;
+    const fallbackLongSide = 2551;
+    const fallbackWidth = orientation === "landscape" ? fallbackLongSide : Math.round(fallbackLongSide * canvas.height / canvas.width);
+    const fallbackHeight = orientation === "landscape" ? Math.round(fallbackLongSide * canvas.height / canvas.width) : fallbackLongSide;
+    const pageWidth = posterPlan?.pageWidth || fallbackWidth;
+    const pageHeight = posterPlan?.pageHeight || fallbackHeight;
     return buildPdfFromJpegs([{ dataUrl: canvasToJpegDataUrl(canvas), width: canvas.width, height: canvas.height }], pageWidth, pageHeight);
   }
   const size = PAPER_SIZES[paper] || PAPER_SIZES.a4;

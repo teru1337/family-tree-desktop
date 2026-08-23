@@ -166,6 +166,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .export-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; }
 .export-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid #d9e3d1; border-radius: 8px; background: #f7fbf4; color: #4e5947; }
 .export-summary div { display: grid; gap: 4px; }.export-summary strong { font-size: 13px; }.export-summary span { color: #858178; font-size: 11px; }
+.export-readability { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid #d9e3d1; border-radius: 8px; background: #f7fbf4; color: #5b6d51; font-size: 11px; line-height: 1.4; }.export-readability strong { flex: 0 0 auto; }.export-readability-warning { border-color: #e5d3a9; background: #fffaf0; color: #846b38; }.export-readability-poor { border-color: #e1c1c1; background: #fff7f7; color: #985353; }
 .export-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid #e3e0d9; }.export-footer .button { min-width: 112px; justify-content: center; }
 @media (max-width: 700px) { .export-format-list, .export-quality-list, .export-mode-list { grid-template-columns: repeat(2, 1fr); }.export-form-grid { grid-template-columns: 1fr; }.export-summary { align-items: flex-start; flex-direction: column; gap: 7px; } }
 @keyframes export-preview-shimmer { to { background-position: -200% 0; } }
