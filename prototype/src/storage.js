@@ -2,8 +2,9 @@ import { normalizePersonDate, validateDateRecord } from "./dates.js";
 import { inspectFamilyData } from "./data-quality.js";
 
 export const PROJECT_FORMAT = "familytree";
-export const PROJECT_VERSION = 4;
-export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, PROJECT_VERSION];
+export const PROJECT_VERSION = 5;
+export const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, PROJECT_VERSION];
+export const PERSON_CONFIDENCE_LEVELS = Object.freeze(["unknown", "low", "medium", "high"]);
 
 // Названия ключей сохраняем прежними, чтобы не потерять рабочие копии после обновления.
 export const WORKING_COPY_KEY = "familytree-working-copy-v1";
@@ -29,6 +30,15 @@ function ensureArray(value) {
 
 function uniqueIds(value) {
   return [...new Set(ensureArray(value).map((item) => String(item)).filter(Boolean))];
+}
+
+function normalizePersonMetadata(person) {
+  return {
+    ...person,
+    isUnknown: person?.isUnknown === true,
+    source: typeof person?.source === "string" ? person.source.trim() : "",
+    confidence: PERSON_CONFIDENCE_LEVELS.includes(person?.confidence) ? person.confidence : "unknown",
+  };
 }
 
 function storageAvailable() {
@@ -103,7 +113,7 @@ function stripPersonRelations(person) {
 
 function stripPersonForStorage(person) {
   const { image, year, datePrecision, birthDateFrom, birthDateTo, ...profile } = stripPersonRelations(person);
-  const normalized = normalizePersonDate({ ...profile, year, datePrecision, birthDateFrom, birthDateTo });
+  const normalized = normalizePersonDate(normalizePersonMetadata({ ...profile, year, datePrecision, birthDateFrom, birthDateTo }));
   const { year: compatibilityYear, datePrecision: compatibilityPrecision, birthDateFrom: compatibilityFrom, birthDateTo: compatibilityTo, ...storedProfile } = normalized;
   return { ...storedProfile, birthDate: normalized.birthDate };
 }
@@ -292,7 +302,7 @@ function relationToPartnership(relation) {
 function migrateProject(raw) {
   if (!raw || typeof raw !== "object") return { payload: raw, migratedFrom: null };
   const version = Number(raw.manifest?.version);
-  if (version === 1 || version === 2 || version === 3) {
+  if (version === 1 || version === 2 || version === 3 || version === 4) {
     const migratedRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
     return {
       payload: {
@@ -418,11 +428,11 @@ export function validateProject(raw) {
 export function createProjectPayload(people, project = {}, relationships = project.relationships || project.relations || project.partnerships || []) {
   const now = new Date().toISOString();
   const normalizedPeopleInput = ensureArray(people);
-  const normalizedPeople = normalizedPeopleInput.map((person) => normalizePersonDate({
+  const normalizedPeople = normalizedPeopleInput.map((person) => normalizePersonDate(normalizePersonMetadata({
     ...person,
     id: String(person?.id || `person-${Math.random().toString(16).slice(2)}`),
     gender: person?.gender === "male" || person?.gender === "female" ? person.gender : "",
-  }));
+  })));
   const normalizedPeopleIds = new Set(normalizedPeople.map((person) => person.id));
   const sourceRelations = ensureArray(relationships).some((relation) => relation?.kind) ? relationships : deriveRelationsFromLegacy(normalizedPeople, relationships);
   const relations = normalizeRelations(sourceRelations, normalizedPeopleIds);
@@ -464,13 +474,13 @@ export function normalizeProject(raw) {
     const id = String(person?.id || `imported-${index + 1}`);
     if (seenIds.has(id)) throw new Error("В файле обнаружены повторяющиеся идентификаторы людей.");
     seenIds.add(id);
-    return normalizePersonDate({
+    return normalizePersonDate(normalizePersonMetadata({
       ...person,
       id,
       name: typeof person?.name === "string" ? person.name : "",
       shortName: typeof person?.shortName === "string" ? person.shortName : (typeof person?.name === "string" ? person.name : ""),
       gender: person?.gender === "male" || person?.gender === "female" ? person.gender : "",
-    });
+    }));
   });
 
   const peopleIds = new Set(people.map((person) => person.id));

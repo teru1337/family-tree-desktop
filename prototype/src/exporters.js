@@ -36,7 +36,7 @@ function truncate(value, maxLength) {
 }
 
 function formatPersonName(person) {
-  const source = person?.shortName || person?.name || "Человек без имени";
+  const source = person?.isUnknown ? "Неизвестный человек" : person?.shortName || person?.name || "Человек без имени";
   return String(source).split("\n").map((line) => truncate(line, 24)).filter(Boolean).slice(0, 2);
 }
 

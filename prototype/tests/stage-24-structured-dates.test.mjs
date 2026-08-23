@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { createProjectPayload, normalizeProject, serializeProject, validateProject } from "../src/storage.js";
+import { createProjectPayload, normalizeProject, PROJECT_VERSION, serializeProject, validateProject } from "../src/storage.js";
 import { formatDateRecord, validateDateRecord } from "../src/dates.js";
 
 const exact = createProjectPayload([{ id: "exact", name: "Точная дата", year: "12.05.1926", datePrecision: "exact" }], { id: "dates" }, []);
@@ -41,7 +41,7 @@ const legacyV3 = {
   photos: [],
 };
 const migrated = normalizeProject(legacyV3);
-assert.equal(migrated.manifest.version, 4);
+assert.equal(migrated.manifest.version, PROJECT_VERSION);
 assert.equal(migrated.manifest.migratedFrom, 3);
 assert.equal(migrated.people[0].birthDate.precision, "year");
 assert.equal(formatDateRecord(migrated.people[0].birthDate), "1900");
