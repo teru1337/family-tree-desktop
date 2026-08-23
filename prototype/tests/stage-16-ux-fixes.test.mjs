@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const stylesSource = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+const packageSource = await readFile(new URL("../package.json", import.meta.url), "utf8");
 
 assert.match(appSource, /pointerStartedInsideCardRef/);
 assert.match(appSource, /onPointerDown=\{handleBackdropPointerDown\}/);
@@ -13,10 +14,20 @@ assert.match(appSource, /onCreate=\{\(\) => createNewTree\(true\)\}/);
 assert.match(appSource, /onSettings=\{\(\) => openSettings\(true\)\}/);
 assert.match(appSource, /onHelp=\{\(\) => openInstruction\(true\)\}/);
 assert.match(appSource, /onClose=\{cancelNewTree\}/);
+assert.doesNotMatch(appSource, /Локальное приложение/);
+assert.doesNotMatch(appSource, /Проекты и резервные копии хранятся локально/);
+assert.match(appSource, /inspector-open/);
+assert.match(appSource, /inspector-closed/);
 assert.match(stylesSource, /button\s*\{[^}]*transition:/);
 assert.match(stylesSource, /@keyframes modal-card-in/);
 assert.match(stylesSource, /@keyframes modal-card-out/);
+assert.match(stylesSource, /@keyframes menu-card-in/);
+assert.match(stylesSource, /@keyframes menu-card-out/);
+assert.match(stylesSource, /\.workspace\.workspace-inspector-closed\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 0/);
+assert.match(stylesSource, /\.inspector\.inspector-closed\s*\{[^}]*transform:\s*translateX\(100%\)/);
+assert.match(stylesSource, /\.instruction-layout\s*\{[^}]*flex:\s*1/);
 assert.match(stylesSource, /\.instruction-image-frame\s*\{[^}]*grid-template-rows:/);
 assert.match(stylesSource, /\.instruction-image-expand\s*\{[^}]*background:\s*#eef6e9/);
 assert.match(stylesSource, /\.instruction-nav-item:hover\s*\{[^}]*transform:/);
+assert.match(packageSource, /"test":\s*"node --test tests\/\*\.test\.mjs"/);
 console.log("Stage 16 UX fixes ok: resize-safe instructions, menu return paths, and motion styles");
