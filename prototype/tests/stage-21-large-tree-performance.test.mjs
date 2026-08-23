@@ -4,11 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 
 const appSource = fs.readFileSync(path.resolve("src/App.jsx"), "utf8");
+const layoutSource = fs.readFileSync(path.resolve("src/tree-layout.js"), "utf8");
 
 test("tree rendering reuses the shared layout instead of calculating it twice", () => {
   assert.match(appSource, /function TreeCanvas\(\{[^}]*layout/);
   assert.match(appSource, /<TreeCanvas[^>]*layout=\{treeLayout\}/);
-  assert.equal((appSource.match(/const layout = useMemo\(\(\) => buildTreeLayout/g) || []).length, 1);
+  assert.match(appSource, /const treeLayout = useMemo\(\(\) => buildTreeLayout/);
+  assert.match(layoutSource, /export function buildTreeLayout/);
 });
 
 test("large trees use viewport-aware node and connector rendering", () => {

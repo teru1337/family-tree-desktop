@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   Camera,
@@ -53,27 +53,17 @@ import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePer
 import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
 import { DEFAULT_SEARCH_FILTERS, filterPeople } from "./search.js";
 import { createRenderIndex, visibleEdges } from "./render-index.js";
-import { runBackgroundExport } from "./export-worker-client.js";
 import { calculateRelationship, personLabel } from "./relationship-calculator.js";
 import { explainUserError } from "./ui-feedback.js";
 import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
-import { getSiblingComponent, orderGenerationMembers, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
+import { getSiblingComponent, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
 import { getNearbyFamilyIds } from "./family-view.js";
 import { canMovePersonNavigation, createPersonNavigation, currentPersonId, movePersonNavigation, visitPerson } from "./person-navigation.js";
 import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_FIELD_LABEL, MAX_CUSTOM_FIELD_VALUE, formatCardFieldLines, normalizeCustomFields, sanitizeCardFields, validateCustomFields } from "./person-fields.js";
 import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_PLACE, MAX_EVENT_SOURCE, MAX_EVENT_TITLE, MAX_TIMELINE_EVENTS, TIMELINE_EVENT_TYPES, normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents, sortTimelineEvents, timelineEventLabel, validateFactSources, validateTimelineEvents } from "./timeline.js";
-import {
-  EXPORT_QUALITY,
-  PAPER_SIZES,
-  buildPdfFromCanvas,
-  buildTreeSvg,
-  calculatePosterPlan,
-  checkExportReadability,
-  canvasToBlob,
-  canvasToTiff,
-  downloadBlob,
-  renderTreeImage,
-} from "./exporters.js";
+import { buildTreeLayout } from "./tree-layout.js";
+
+const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 
 const initialPeople = [];
 
@@ -630,65 +620,6 @@ function RelationshipEditor({ person, people, partnerships, onSave, onDeleteRela
   );
 }
 
-function getParentIds(person) {
-  const links = Array.isArray(person.parentLinks) ? person.parentLinks.map((link) => link.personId) : [];
-  return [...new Set([...(links.length ? links : person.parentIds || [])])];
-}
-
-function buildTreeLayout(people, partnerships = [], options = {}) {
-  const byId = new Map(people.map((person) => [person.id, person]));
-  const groupParent = new Map(people.map((person) => [person.id, person.id]));
-  const findGroup = (id) => {
-    let root = groupParent.get(id) || id;
-    while (groupParent.get(root) !== root) root = groupParent.get(root);
-    let current = id;
-    while (groupParent.get(current) !== current) { const next = groupParent.get(current); groupParent.set(current, root); current = next; }
-    return root;
-  };
-  const unionGroups = (firstId, secondId) => { const first = findGroup(firstId); const second = findGroup(secondId); if (first !== second) groupParent.set(second, first); };
-  partnerships.forEach((partnership) => { const [firstId, secondId] = partnership.personIds || []; if (byId.has(firstId) && byId.has(secondId)) unionGroups(firstId, secondId); });
-  const groupParents = new Map();
-  people.forEach((person) => {
-    const group = findGroup(person.id);
-    if (!groupParents.has(group)) groupParents.set(group, new Set());
-    getParentIds(person).filter((parentId) => byId.has(parentId)).forEach((parentId) => { const parentGroup = findGroup(parentId); if (parentGroup !== group) groupParents.get(group).add(parentGroup); });
-  });
-  const generationCache = new Map();
-  const getGroupGeneration = (group, stack = new Set()) => {
-    if (generationCache.has(group)) return generationCache.get(group);
-    if (stack.has(group)) return 0;
-    const nextStack = new Set(stack);
-    nextStack.add(group);
-    const parents = [...(groupParents.get(group) || [])];
-    const generation = parents.length ? Math.min(7, Math.min(...parents.map((parentGroup) => getGroupGeneration(parentGroup, nextStack) + 1))) : 0;
-    generationCache.set(group, generation);
-    return generation;
-  };
-  const groups = [];
-  people.forEach((person) => {
-    const generation = getGroupGeneration(findGroup(person.id));
-    if (!groups[generation]) groups[generation] = [];
-    groups[generation].push(person);
-  });
-  const generations = groups.map((members, index) => ({ index, members: orderGenerationMembers(members || []) })).filter((group) => group.members.length);
-  const cardWidth = Math.max(190, Number(options.cardWidth) || 190);
-  const cardHeight = Math.max(92, Number(options.cardHeight) || 92);
-  const columnStep = Math.max(cardWidth + 70, Number(options.columnStep) || 280);
-  const horizontalPadding = Math.max(260, Number(options.horizontalPadding) || 260);
-  const verticalPadding = Math.max(180, Number(options.verticalPadding) || 180);
-  const maxMembers = Math.max(1, ...generations.map((group) => group.members.length));
-  const width = Math.max(1320, maxMembers * columnStep + 160) + horizontalPadding * 2;
-  const top = 78 + verticalPadding;
-  const rowStep = Math.max(cardHeight + 110, Number(options.rowStep) || 230);
-  const height = Math.max(850, 78 + generations.length * rowStep + 100) + verticalPadding * 2;
-  const positions = Object.fromEntries(generations.flatMap((group) => {
-    const groupWidth = (group.members.length - 1) * columnStep + cardWidth;
-    const startX = Math.max(55, (width - groupWidth) / 2);
-    return group.members.map((person, index) => [person.id, { left: startX + index * columnStep, top: top + group.index * rowStep, width: cardWidth, height: cardHeight, generation: group.index }]);
-  }));
-  return { generations, positions, width, height, top, cardWidth, cardHeight, columnStep, rowStep };
-}
-
 function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, renderIndex = null, strictVisible = false }) {
   const byId = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships, byId), [people, partnerships, byId]);
@@ -1160,134 +1091,6 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
           <div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${nextTreeStyle === style.value ? "selected" : ""}`} onClick={() => setNextTreeStyle(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div>
         </div>
         <div className="view-settings-footer"><button type="button" className="button button-ghost" onClick={onClose}>Отмена</button><button type="button" className="button button-primary" onClick={save}>Сохранить настройки</button></div>
-      </section>
-    </div>
-  );
-}
-
-function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, showPhotos, cardFields, onClose, onToast }) {
-  const [format, setFormat] = useState(initialFormat);
-  const [quality, setQuality] = useState(initialFormat === "print" ? "print" : "print");
-  const [pdfMode, setPdfMode] = useState(initialFormat === "print" ? "tiles" : "poster");
-  const [paper, setPaper] = useState("a4");
-  const [orientation, setOrientation] = useState("landscape");
-  const [cardSize, setCardSize] = useState("standard");
-  const [spacing, setSpacing] = useState("comfortable");
-  const [fontScale, setFontScale] = useState("standard");
-  const [connectionDensity, setConnectionDensity] = useState("normal");
-  const [busy, setBusy] = useState(false);
-  const [exportProgress, setExportProgress] = useState("");
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [previewBusy, setPreviewBusy] = useState(true);
-  const [previewError, setPreviewError] = useState("");
-  const [previewAttempt, setPreviewAttempt] = useState(0);
-  const layoutOptions = useMemo(() => {
-    const cardOptions = { compact: { cardWidth: 190, cardHeight: 92 }, standard: { cardWidth: 220, cardHeight: 102 }, large: { cardWidth: 250, cardHeight: 114 } };
-    const spacingOptions = { compact: { columnStep: 280, rowStep: 230, horizontalPadding: 260, verticalPadding: 180 }, comfortable: { columnStep: 350, rowStep: 280, horizontalPadding: 300, verticalPadding: 210 }, spacious: { columnStep: 430, rowStep: 340, horizontalPadding: 340, verticalPadding: 240 } };
-    const base = cardOptions[cardSize];
-    return { ...base, cardHeight: base.cardHeight + Math.max(0, sanitizeCardFields(cardFields).length - 1) * 14, ...spacingOptions[spacing] };
-  }, [cardSize, spacing, cardFields]);
-  const layout = useMemo(() => buildTreeLayout(people, partnerships, layoutOptions), [people, partnerships, layoutOptions]);
-  const qualityInfo = EXPORT_QUALITY[quality] || EXPORT_QUALITY.print;
-  const fontScaleValue = fontScale === "large" ? 1.2 : fontScale === "extra-large" ? 1.35 : 1;
-  const connectionGap = connectionDensity === "spacious" ? 44 : 24;
-  const pixelWidth = Math.round(layout.width * qualityInfo.scale);
-  const pixelHeight = Math.round(layout.height * qualityInfo.scale);
-  const tileSize = PAPER_SIZES[paper] || PAPER_SIZES.a4;
-  const pageWidth = orientation === "landscape" ? tileSize.height : tileSize.width;
-  const pageHeight = orientation === "landscape" ? tileSize.width : tileSize.height;
-  const exportMode = format === "print" ? "tiles" : format === "pdf" ? pdfMode : "image";
-  const posterPlan = useMemo(() => calculatePosterPlan(layout, { scale: qualityInfo.scale }), [layout, qualityInfo.scale]);
-  const readability = useMemo(() => checkExportReadability({ format, mode: exportMode, scale: qualityInfo.scale, fontScale: fontScaleValue, peopleCount: people.length }), [format, exportMode, qualityInfo.scale, fontScaleValue, people.length]);
-  const pageCount = exportMode === "poster" ? 1 : Math.ceil(pixelWidth / (pageWidth * 2)) * Math.ceil(pixelHeight / (pageHeight * 2));
-  const previewCaption = format === "pdf" && pdfMode === "poster"
-    ? "Предпросмотр большого плаката"
-    : format === "png"
-      ? "Предпросмотр изображения PNG"
-      : format === "tiff"
-        ? "Предпросмотр изображения TIFF"
-        : "Предпросмотр разметки по листам";
-  const formatOptions = [
-    { value: "pdf", title: "PDF", description: "плакат или листы" },
-    { value: "png", title: "PNG", description: "изображение для альбома" },
-    { value: "tiff", title: "TIFF", description: "для типографии" },
-    { value: "print", title: "Печать по листам", description: "многостраничный PDF" },
-  ];
-
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl = "";
-    const timer = window.setTimeout(() => {
-      buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScale: fontScaleValue, connectionGap })
-        .then((svg) => {
-          if (cancelled) return;
-          objectUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-          setPreviewUrl(objectUrl);
-        })
-        .catch((error) => {
-          if (cancelled) return;
-          setPreviewError(explainUserError(error, { action: "Не удалось подготовить предпросмотр", next: "проверьте параметры экспорта и повторите" }));
-        })
-        .finally(() => {
-          if (!cancelled) setPreviewBusy(false);
-        });
-    }, 0);
-    setPreviewUrl("");
-    setPreviewBusy(true);
-    setPreviewError("");
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScaleValue, connectionGap, previewAttempt]);
-
-  const runExport = async () => {
-    setBusy(true);
-    setExportProgress("Подготавливаю файл…");
-    const baseName = `семейное-древо-${new Date().toISOString().slice(0, 10)}`;
-    const createExportInMainThread = async () => {
-      const rendered = await renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap });
-      if (format === "png") return { blob: await canvasToBlob(rendered.canvas, "image/png"), fileName: `${baseName}.png`, message: "PNG-файл подготовлен" };
-      if (format === "tiff") return { blob: canvasToTiff(rendered.canvas), fileName: `${baseName}.tiff`, message: "TIFF-файл подготовлен" };
-      const pdf = await buildPdfFromCanvas(rendered.canvas, { mode: exportMode, paper, orientation, posterPlan });
-      return { blob: pdf, fileName: `${baseName}-${exportMode === "poster" ? "плакат" : "печать"}.pdf`, message: exportMode === "poster" ? "PDF-плакат подготовлен" : "PDF для печати подготовлен" };
-    };
-    try {
-      let result;
-      try {
-        result = await runBackgroundExport({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap, format: format === "print" ? "pdf" : format, mode: exportMode, paper, orientation, posterPlan }, { onProgress: ({ label }) => setExportProgress(label) });
-      } catch (error) {
-        if (!error.isBackgroundExportError) throw error;
-        setExportProgress("Фоновый режим недоступен, готовлю файл…");
-        result = await createExportInMainThread();
-      }
-      downloadBlob(result.blob, result.fileName);
-      onToast(result.message);
-      onClose();
-    } catch (error) {
-      onToast(explainUserError(error, { action: "Не удалось подготовить файл", next: "проверьте формат и параметры экспорта, затем повторите" }));
-    } finally {
-      setBusy(false);
-      setExportProgress("");
-    }
-  };
-
-  return (
-    <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="backup-modal export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title" onClick={(event) => event.stopPropagation()}>
-        <div className="backup-modal-header"><div><span className="eyebrow">Локальный экспорт</span><h2 id="export-modal-title">Экспорт семейного дерева</h2><p>Файл создаётся на этом компьютере из текущего вида дерева.</p></div><button type="button" className="icon-button backup-close" onClick={onClose} aria-label="Закрыть экспорт"><X size={21} /></button></div>
-        <div className="export-modal-body">
-          <div className="export-setting-group"><span className="field-label">Формат</span><div className="export-format-list">{formatOptions.map((option) => <button type="button" key={option.value} className={`export-choice ${format === option.value ? "selected" : ""}`} onClick={() => { setFormat(option.value); if (option.value === "print") setPdfMode("tiles"); }}><strong>{option.title}</strong><small>{option.description}</small></button>)}</div></div>
-          <div className="export-setting-group"><span className="field-label">Качество изображения</span><div className="export-quality-list">{Object.entries(EXPORT_QUALITY).map(([value, info]) => <button type="button" key={value} className={`export-choice export-quality-choice ${quality === value ? "selected" : ""}`} onClick={() => setQuality(value)}><strong>{info.label}</strong><small>{info.description}</small></button>)}</div></div>
-          <div className="export-setting-group"><span className="field-label">Оформление карточек и связей</span><div className="export-form-grid"><label className="field"><span>Размер карточек</span><select value={cardSize} onChange={(event) => setCardSize(event.target.value)}><option value="compact">Компактный</option><option value="standard">Стандартный</option><option value="large">Крупный</option></select></label><label className="field"><span>Отступы между поколениями</span><select value={spacing} onChange={(event) => setSpacing(event.target.value)}><option value="compact">Меньше</option><option value="comfortable">Обычные</option><option value="spacious">Больше</option></select></label><label className="field"><span>Размер шрифта</span><select value={fontScale} onChange={(event) => setFontScale(event.target.value)}><option value="standard">Стандартный</option><option value="large">Крупный</option><option value="extra-large">Очень крупный</option></select></label><label className="field"><span>Плотность связей</span><select value={connectionDensity} onChange={(event) => setConnectionDensity(event.target.value)}><option value="normal">Обычная</option><option value="spacious">Свободная</option></select></label></div></div>
-          {(format === "pdf" || format === "print") && <div className="export-setting-group"><span className="field-label">Разметка страниц</span>{format === "pdf" && <div className="export-mode-list"><button type="button" className={`export-choice ${pdfMode === "poster" ? "selected" : ""}`} onClick={() => setPdfMode("poster")}><strong>Большой плакат</strong><small>Всё дерево на одном огромном листе</small></button><button type="button" className={`export-choice ${pdfMode === "tiles" ? "selected" : ""}`} onClick={() => setPdfMode("tiles")}><strong>Листы по страницам</strong><small>Разбить дерево на страницы для печати</small></button></div>}<div className="export-form-grid"><label className="field"><span>Размер листа</span><select value={paper} onChange={(event) => setPaper(event.target.value)}><option value="a4">A4</option><option value="a3">A3</option><option value="a2">A2</option></select></label><label className="field"><span>Ориентация</span><select value={orientation} onChange={(event) => setOrientation(event.target.value)}><option value="landscape">Альбомная</option><option value="portrait">Книжная</option></select></label></div></div>}
-          <div className={`export-readability export-readability-${readability.level}`} role="status"><strong>Читаемость</strong><span>{readability.message}</span></div>
-          <div className="export-preview" aria-live="polite"><div className="export-preview-header"><div><span className="field-label">Предпросмотр</span><strong>{previewCaption}</strong></div><span className="export-preview-mode">{exportMode === "poster" ? "Одно полотно" : exportMode === "image" ? "Одно изображение" : `${pageCount} ${pageCount === 1 ? "лист" : pageCount < 5 ? "листа" : "листов"}`}</span></div><div className={`export-preview-stage ${previewBusy ? "is-loading" : ""}`} aria-busy={previewBusy}>{previewBusy && <div className="export-preview-placeholder"><span className="preview-spinner" aria-hidden="true" /><strong>Готовлю предпросмотр…</strong><small>Компоновка дерева появится здесь</small></div>}{!previewBusy && previewError && <div className="export-preview-placeholder"><Info size={25} /><strong>Предпросмотр недоступен</strong><small>{previewError}</small><button type="button" className="button button-secondary preview-retry" onClick={() => setPreviewAttempt((attempt) => attempt + 1)}>Повторить</button></div>}{!previewBusy && !previewError && previewUrl && <img className="export-preview-image" src={previewUrl} alt={`Предпросмотр: ${previewCaption.toLowerCase()}`} />}</div><small className="export-preview-help">Показана вся компоновка дерева. Итоговый файл сохранится с выбранным качеством: {qualityInfo.label.toLowerCase()}.</small></div>
-          <div className="export-summary"><div><strong>{pixelWidth.toLocaleString("ru-RU")} × {pixelHeight.toLocaleString("ru-RU")} пикселей</strong><span>Текущее дерево: {people.length} человек · {layout.generations.length} поколения</span>{exportMode === "poster" && <span>Авторазмер плаката: {posterPlan.widthCm} × {posterPlan.heightCm} см · {posterPlan.generations} поколений</span>}</div>{(format === "pdf" || format === "print") && <span>{exportMode === "poster" ? "1 лист-плакат" : `${pageCount} ${pageCount === 1 ? "лист" : pageCount < 5 ? "листа" : "листов"}`}</span>}</div>
-          <div className="backup-note"><Info size={16} /> PNG подходит для семейного альбома, TIFF — для типографии, PDF — для домашней печати и большого плаката.</div>
-        </div>
-        <div className="export-footer"><button type="button" className="button button-ghost" onClick={onClose} disabled={busy}>Отмена</button><button type="button" className="button button-primary" onClick={runExport} disabled={busy}>{busy ? exportProgress || "Подготавливаю…" : "Создать файл"}</button></div>
       </section>
     </div>
   );
@@ -2239,7 +2042,7 @@ export function App() {
        {archiveOpen && <ArchiveModal payload={buildPayload()} importState={archiveImport} onClose={() => { setArchiveOpen(false); setArchiveImport(null); }} onDownload={saveFamilyArchive} onImport={handleArchiveSelected} onRestoreImport={restoreFamilyArchive} onClearImport={() => setArchiveImport(null)} />}
        {viewSettingsOpen && <ViewSettingsModal treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onTreeStyleChange={(value) => updateViewSetting("treeStyle", value)} onShowPhotosChange={(value) => updateViewSetting("showPhotos", value)} onCardFieldsChange={(value) => updateViewSetting("cardFields", value)} onClose={() => setViewSettingsOpen(false)} />}
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
-       {exportModalOpen && <ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onClose={() => setExportModalOpen(false)} onToast={setToast} />}
+       {exportModalOpen && <Suspense fallback={<div className="backup-modal-backdrop" role="status" aria-live="polite"><section className="backup-modal export-loading" role="dialog" aria-modal="true" aria-label="Открытие экспорта"><strong>Открываю экспорт…</strong></section></div>}><ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onClose={() => setExportModalOpen(false)} onToast={setToast} /></Suspense>}
        {relationshipCalculatorOpen && <RelationshipCalculatorModal people={people} partnerships={partnerships} initialSourceId={selectedId} onClose={() => setRelationshipCalculatorOpen(false)} onSelectPerson={selectPerson} onShowOnMap={focusPersonOnMap} />}
        {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} largeText={largeText} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}

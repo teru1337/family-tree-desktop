@@ -21,13 +21,15 @@ test("readability check warns about a small export scale", () => {
 
 test("export UI exposes sizing, readability and poster planning", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const exportModalSource = await readFile(new URL("../src/ExportModal.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(source, /calculatePosterPlan/);
-  assert.match(source, /checkExportReadability/);
-  assert.match(source, /Размер карточек/);
-  assert.match(source, /Плотность связей/);
-  assert.match(source, /Авторазмер плаката/);
-  assert.match(source, /export-readability/);
+  assert.match(source, /ExportModal\.jsx/);
+  assert.match(exportModalSource, /calculatePosterPlan/);
+  assert.match(exportModalSource, /checkExportReadability/);
+  assert.match(exportModalSource, /Размер карточек/);
+  assert.match(exportModalSource, /Плотность связей/);
+  assert.match(exportModalSource, /Авторазмер плаката/);
+  assert.match(exportModalSource, /export-readability/);
   assert.match(styles, /\.export-readability/);
 });
 
