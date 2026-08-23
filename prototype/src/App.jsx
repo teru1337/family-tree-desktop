@@ -472,7 +472,27 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
   return <svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const from = positions[parent.id]; const to = positions[child.id]; const startX = from.left + from.width / 2; const startY = from.top + from.height; const endX = to.left + to.width / 2; const endY = to.top; const middleY = startY + Math.max(24, (endY - startY) / 2); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""}`} d={`M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const a = positions[first.id]; const b = positions[second.id]; const start = a.left < b.left ? a : b; const end = a.left < b.left ? b : a; const startX = start.left + start.width; const startY = start.top + start.height / 2; const endX = end.left; const endY = end.top + end.height / 2; const middleX = startX + Math.max(18, (endX - startX) / 2); const label = partnership.status === "divorced" ? "Развод" : partnershipTypeLabel[partnership.type] || "Связь"; return <g key={partnership.id}><path className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""}`} d={`M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}`} /><text className="partnership-label" x={middleX} y={Math.min(startY, endY) - 8} textAnchor="middle">{label}</text></g>; })}</g></svg>;
 }
 
-function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, focusRequest, inspectorOpen, onToggleInspector, onFocusSelected }) {
+function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewportSize, onNavigate }) {
+  const mapWidth = 204;
+  const mapHeight = 136;
+  const padding = 9;
+  const scale = Math.min((mapWidth - padding * 2) / layout.width, (mapHeight - padding * 2) / layout.height);
+  const point = (position) => ({ x: padding + position.left * scale, y: padding + position.top * scale, width: position.width * scale, height: position.height * scale });
+  const parentLines = people.flatMap((child) => getParentIds(child).map((parentId) => ({ parent: positions[parentId], child: positions[child.id] }))).filter((edge) => edge.parent && edge.child);
+  const partnerLines = partnerships.map((partnership) => ({ first: positions[partnership.personIds?.[0]], second: positions[partnership.personIds?.[1]] })).filter((edge) => edge.first && edge.second);
+  const viewportWidth = viewportSize.width ? viewportSize.width / zoom : 0;
+  const viewportHeight = viewportSize.height ? viewportSize.height / zoom : 0;
+  const visibleBoard = { x: Math.max(0, -pan.x / zoom), y: Math.max(0, -pan.y / zoom), width: Math.min(layout.width, viewportWidth), height: Math.min(layout.height, viewportHeight) };
+  const navigate = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const localX = ((event.clientX - rect.left) / rect.width) * mapWidth;
+    const localY = ((event.clientY - rect.top) / rect.height) * mapHeight;
+    onNavigate({ x: Math.max(0, Math.min(layout.width, (localX - padding) / scale)), y: Math.max(0, Math.min(layout.height, (localY - padding) / scale)) });
+  };
+  return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{people.map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
+}
+
+function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected }) {
   const dragRef = useRef(null);
   const personDragRef = useRef(null);
   const viewportRef = useRef(null);
@@ -607,6 +627,10 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     onPanChange(clampPan({ x: pan.x - event.deltaX, y: pan.y - event.deltaY }));
   };
   useEffect(() => {
+    if (!keyboardPanRequest?.token) return;
+    movePan(keyboardPanRequest.dx, keyboardPanRequest.dy);
+  }, [keyboardPanRequest?.token]);
+  useEffect(() => {
     if (!focusRequest?.id || !viewportRef.current) return;
     const position = renderedPositions[focusRequest.id];
     if (!position) return;
@@ -621,11 +645,18 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     const nextPan = clampPan(pan);
     if (nextPan.x !== pan.x || nextPan.y !== pan.y) onPanChange(nextPan);
   }, [layout.width, layout.height, zoom, inspectorOpen]);
+  const navigateToBoardPoint = ({ x, y }) => {
+    const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
+    const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
+    if (!width || !height) return;
+    onPanChange(clampPan({ x: width / 2 - x * zoom, y: height / 2 - y * zoom }));
+  };
   const styleLabel = treeStyle === "album" ? "Семейный альбом" : treeStyle === "minimal" ? "Сдержанный" : "Классический";
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
       <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
   );
@@ -954,6 +985,17 @@ export function App() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [focusRequest, setFocusRequest] = useState(null);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorWidth, setInspectorWidth] = useState(() => {
+    if (typeof window === "undefined") return 380;
+    try {
+      const savedWidth = Number(window.localStorage?.getItem("family-tree-inspector-width"));
+      return Number.isFinite(savedWidth) && savedWidth >= 300 && savedWidth <= 560 ? savedWidth : 380;
+    } catch {
+      return 380;
+    }
+  });
+  const [inspectorResizing, setInspectorResizing] = useState(false);
+  const [keyboardPanRequest, setKeyboardPanRequest] = useState(null);
   const [treeStyle, setTreeStyle] = useState(sessionSettings.treeStyle || "classic");
   const [showPhotos, setShowPhotos] = useState(sessionSettings.showPhotos !== false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(sessionSettings.autoSave !== false);
@@ -987,6 +1029,8 @@ export function App() {
   const historyRef = useRef(null);
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false });
   const fileInputRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const inspectorResizeRef = useRef(null);
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
   if (!historyRef.current) historyRef.current = createHistory(createSnapshot(people, partnerships, projectMeta));
   const treeLayout = useMemo(() => buildTreeLayout(people, partnerships), [people, partnerships]);
@@ -1103,11 +1147,58 @@ export function App() {
     setHistoryStatus(getHistoryStatus(nextHistory));
   }, [people, partnerships, projectMeta]);
   useEffect(() => {
+    try {
+      window.localStorage?.setItem("family-tree-inspector-width", String(inspectorWidth));
+    } catch {
+      // Настройка ширины панели не должна мешать работе приложения.
+    }
+  }, [inspectorWidth]);
+  useEffect(() => {
     const handleKeyDown = (event) => {
+      const key = event.key.toLowerCase();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (updateOpen) setUpdateOpen(false);
+        else if (pendingUnsavedAction) setPendingUnsavedAction(null);
+        else if (deleteConfirmId) setDeleteConfirmId("");
+        else if (newTreeConfirmOpen) cancelNewTree();
+        else if (exportModalOpen) setExportModalOpen(false);
+        else if (instructionOpen) closeInstruction();
+        else if (settingsOpen) closeSettings();
+        else if (backupOpen) setBackupOpen(false);
+        else if (viewSettingsOpen) setViewSettingsOpen(false);
+        else if (filtersOpen) setFiltersOpen(false);
+        else if (moreOpen) setMoreOpen(false);
+        else if (mainMenuOpen) setMainMenuOpen(false);
+        else if (inspectorOpen) closeInspector();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "f") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
       const tagName = event.target?.tagName?.toLowerCase();
       if (tagName === "input" || tagName === "textarea" || tagName === "select" || event.target?.isContentEditable) return;
+      if (!(event.ctrlKey || event.metaKey) && !event.altKey) {
+        const panByKey = { ArrowUp: [0, -110], ArrowDown: [0, 110], ArrowLeft: [-110, 0], ArrowRight: [110, 0] }[event.key];
+        if (panByKey) {
+          event.preventDefault();
+          setKeyboardPanRequest((current) => ({ dx: panByKey[0], dy: panByKey[1], token: (current?.token || 0) + 1 }));
+          return;
+        }
+        if (event.key === "+" || event.key === "=") {
+          event.preventDefault();
+          setZoom((current) => Math.min(1.35, current + 0.08));
+          return;
+        }
+        if (event.key === "-" || event.key === "_") {
+          event.preventDefault();
+          setZoom((current) => Math.max(0.55, current - 0.08));
+          return;
+        }
+      }
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-      const key = event.key.toLowerCase();
       if (key === "z" && event.shiftKey) {
         event.preventDefault();
         redoAction();
@@ -1121,7 +1212,7 @@ export function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [historyStatus]);
+  }, [historyStatus, updateOpen, pendingUnsavedAction, deleteConfirmId, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -1160,6 +1251,25 @@ export function App() {
   const focusPersonOnMap = (id) => { const person = people.find((item) => item.id === id); if (!person) return; setSelectedId(id); setQuery(""); setInspectorOpen(true); setFocusRequest((current) => ({ id, token: (current?.token || 0) + 1 })); setToast(`Человек показан на карте: ${personDisplayName(person)}`); };
   const openEditor = (person = null, relation = "") => { setEditorSessionKey((current) => current + 1); setDraft(person ? normalizePersonDate({ ...person }) : { ...blankPerson, id: "" }); setRelationshipMode(relation); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || ""); setRelationshipEditing(false); setInspectorOpen(true); setEditing(true); };
   const closeInspector = () => { setEditing(false); setRelationshipEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setInspectorOpen(false); };
+  const resizeInspectorBy = (delta) => setInspectorWidth((current) => Math.max(300, Math.min(560, current + delta)));
+  const startInspectorResize = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    inspectorResizeRef.current = { startX: event.clientX, startWidth: inspectorWidth };
+    setInspectorResizing(true);
+  };
+  const moveInspectorResize = (event) => {
+    const resize = inspectorResizeRef.current;
+    if (!resize) return;
+    setInspectorWidth(Math.max(300, Math.min(560, resize.startWidth - (event.clientX - resize.startX))));
+  };
+  const endInspectorResize = (event) => {
+    if (!inspectorResizeRef.current) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    inspectorResizeRef.current = null;
+    setInspectorResizing(false);
+  };
   const requestDelete = (id) => { if (people.some((person) => person.id === id)) setDeleteConfirmId(id); };
   const deletePerson = () => {
     const personToDelete = people.find((person) => person.id === deleteConfirmId);
@@ -1480,7 +1590,7 @@ export function App() {
   };
 
   return (
-    <div className="app-window" onClick={() => { if (moreOpen) setMoreOpen(false); }}>
+    <div className={`app-window ${inspectorResizing ? "is-resizing" : ""}`} onClick={() => { if (moreOpen) setMoreOpen(false); }}>
       <div className="window-bar"><div className="window-title"><TreeStructure size={18} weight="fill" /><span>Семейное древо</span></div><div className="window-controls"><Minus size={15} /><Square size={12} /><X size={15} /></div></div>
        <header className="app-header" onClick={(event) => event.stopPropagation()}>
          <button type="button" className="brand brand-button" onClick={() => setMainMenuOpen(true)} aria-label="Открыть главное меню"><TreeStructure size={42} weight="fill" /><span>Семейное древо</span></button>
@@ -1489,7 +1599,7 @@ export function App() {
           <button type="button" className="button button-secondary file-button" onClick={openProject}><FolderOpen size={18} /> Открыть проект</button>
           <button type="button" className="button button-primary save-project-button" onClick={saveProject}><FloppyDisk size={18} weight="bold" /> Сохранить проект</button>
           <div className="history-actions" aria-label="История действий"><button type="button" className="icon-button history-button" onClick={undoAction} disabled={!historyStatus.canUndo} title="Отменить действие (Ctrl+Z)" aria-label="Отменить действие"><ArrowCounterClockwise size={20} /></button><button type="button" className="icon-button history-button" onClick={redoAction} disabled={!historyStatus.canRedo} title="Повторить действие (Ctrl+Y)" aria-label="Повторить действие"><ArrowClockwise size={20} /></button></div>
-          <div className="search-wrap"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по именам..." aria-label="Поиск по именам" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}<button className={`filter-button ${filtersOpen || hasActiveSearch && (searchFilters.generation !== "all" || searchFilters.relation !== "all" || searchFilters.yearFrom || searchFilters.yearTo || searchFilters.place) ? "filter-button-active" : ""}`} type="button" onClick={(event) => { event.stopPropagation(); setFiltersOpen((open) => !open); }} aria-label="Открыть фильтры поиска" title="Фильтры поиска"><Funnel size={17} /></button>{filtersOpen && <SearchFilterPanel filters={searchFilters} generations={treeLayout.generations} onChange={(field, value) => setSearchFilters((current) => ({ ...current, [field]: value }))} onReset={() => setSearchFilters({ ...DEFAULT_SEARCH_FILTERS })} />}{hasActiveSearch && !filtersOpen && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
+          <div className="search-wrap"><MagnifyingGlass size={19} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по именам..." aria-label="Поиск по именам" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}<button className={`filter-button ${filtersOpen || hasActiveSearch && (searchFilters.generation !== "all" || searchFilters.relation !== "all" || searchFilters.yearFrom || searchFilters.yearTo || searchFilters.place) ? "filter-button-active" : ""}`} type="button" onClick={(event) => { event.stopPropagation(); setFiltersOpen((open) => !open); }} aria-label="Открыть фильтры поиска" title="Фильтры поиска"><Funnel size={17} /></button>{filtersOpen && <SearchFilterPanel filters={searchFilters} generations={treeLayout.generations} onChange={(field, value) => setSearchFilters((current) => ({ ...current, [field]: value }))} onReset={() => setSearchFilters({ ...DEFAULT_SEARCH_FILTERS })} />}{hasActiveSearch && !filtersOpen && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
          <div className="header-actions">
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
@@ -1497,7 +1607,7 @@ export function App() {
            <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
-      <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`}><TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека") } /><aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside></main>
+      <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}><TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека") } /><aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}><div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} /><div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>{editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} onSave={saveRelationship} onCancel={() => setRelationshipEditing(false)} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={() => { setInspectorOpen(true); setRelationshipEditing(true); }} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} />}</aside></main>
        <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
        {toast && <div className="toast"><CheckCircle size={19} weight="fill" /> {toast}</div>}
