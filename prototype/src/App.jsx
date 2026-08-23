@@ -56,10 +56,6 @@ import {
   renderTreeImage,
 } from "./exporters.js";
 
-const avatar = {
-  man: "/assets/portrait-man.png",
-};
-
 const initialPeople = [];
 
 const blankPerson = { id: "", name: "", shortName: "", year: "", place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], occupation: "", biography: "", maidenName: "" };
@@ -256,6 +252,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
 function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partnershipType, connectionTargetId, people, onChange, onRelationChange, onRelationshipTypeChange, onPartnershipTypeChange, onConnectionTargetChange, onSave, onCancel }) {
   const [errors, setErrors] = useState({});
   const [wizardStep, setWizardStep] = useState(isNew ? 1 : 2);
+  const photoInputRef = useRef(null);
   useEffect(() => { setWizardStep(isNew ? 1 : 2); setErrors({}); }, [isNew, draft?.id]);
   const update = (field, value) => {
     onChange({ ...draft, [field]: value });
@@ -269,6 +266,26 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   const changeConnectionTarget = (value) => {
     onConnectionTargetChange(value);
     setErrors((current) => ({ ...current, connectionTargetId: "" }));
+  };
+  const choosePhoto = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setErrors((current) => ({ ...current, image: "Выберите файл изображения PNG, JPEG, WebP или GIF." }));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setErrors((current) => ({ ...current, image: "Размер фотографии не должен превышать 8 МБ." }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      onChange({ ...draft, image: String(reader.result || "") });
+      setErrors((current) => ({ ...current, image: "" }));
+    };
+    reader.onerror = () => setErrors((current) => ({ ...current, image: "Не удалось прочитать фотографию. Попробуйте другой файл." }));
+    reader.readAsDataURL(file);
   };
   const handleSave = () => {
     const nextErrors = validatePersonDraft(draft, { isNew, relationshipMode, connectionTargetId });
@@ -298,7 +315,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
   const relationDescription = relationshipMode === "parent" ? (relationshipType === "step" ? "Новый человек станет отчимом или мачехой выбранной записи." : relationshipType === "adoptive" ? "Новый человек станет усыновителем выбранной записи." : "Новый человек станет биологическим родителем выбранной записи.") : relationshipMode === "child" ? (relationshipType === "step" ? "Новый человек станет пасынком или падчерицей выбранной записи." : relationshipType === "adoptive" ? "Новый человек будет отмечен как усыновлённый ребёнок выбранной записи." : "Новый человек станет биологическим ребёнком выбранной записи.") : relationshipMode === "partner" ? `Новый человек будет добавлен как ${partnershipType === "marriage" ? "супруг или супруга" : "партнёр"}.` : "Можно сохранить человека без связи и добавить её позже.";
   return (
     <div className="editor-content">
-      <div className="editor-intro"><div className="editor-photo-wrap"><PersonAvatar person={draft} large /><button type="button" className="photo-action" onClick={() => update("image", avatar.man)}><Camera size={16} /> Добавить фото</button></div><div><span className="eyebrow">{isNew ? relationText : "Редактирование"}</span><h2>{isNew ? "Добавить человека" : "Изменить сведения"}</h2><p>Заполните только то, что известно. Остальные поля можно оставить пустыми.</p></div></div>
+      <div className="editor-intro"><div className="editor-photo-wrap"><PersonAvatar person={draft} large /><button type="button" className="photo-action" onClick={() => photoInputRef.current?.click()}><Camera size={16} /> {draft.image ? "Заменить фото" : "Добавить фото"}</button><input ref={photoInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={choosePhoto} />{errors.image && <small className="field-error photo-error">{errors.image}</small>}</div><div><span className="eyebrow">{isNew ? relationText : "Редактирование"}</span><h2>{isNew ? "Добавить человека" : "Изменить сведения"}</h2><p>Заполните только то, что известно. Остальные поля можно оставить пустыми.</p></div></div>
       {isNew && <div className="wizard-progress" aria-label={`Шаг ${wizardStep} из 3`}><div className={wizardStep >= 1 ? "current" : ""}><span>1</span><strong>Связь</strong></div><div className={wizardStep >= 2 ? "current" : ""}><span>2</span><strong>Сведения</strong></div><div className={wizardStep >= 3 ? "current" : ""}><span>3</span><strong>Проверка</strong></div></div>}
       {(!isNew || wizardStep !== 3) && <div className="form-grid">
         {isNew && wizardStep === 1 && <div className="field field-full connection-field wizard-step"><div className="wizard-step-heading"><span className="eyebrow">Шаг 1 из 3</span><strong>Сначала определим место человека в семье</strong><small>Можно добавить его отдельно, связать с родителем, ребёнком или супругом.</small></div><span>Кем будет новый человек? <em>необязательно</em></span><div className="wizard-relation-list"><button type="button" className={`wizard-relation-choice ${relationshipMode === "" ? "selected" : ""}`} onClick={() => changeRelationMode("")}><strong>Без связи</strong><small>Добавить отдельно</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "parent" ? "selected" : ""}`} onClick={() => changeRelationMode("parent")}><strong>Родитель</strong><small>Родитель выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "child" ? "selected" : ""}`} onClick={() => changeRelationMode("child")}><strong>Ребёнок</strong><small>Ребёнок выбранного человека</small></button><button type="button" className={`wizard-relation-choice ${relationshipMode === "partner" ? "selected" : ""}`} onClick={() => changeRelationMode("partner")}><strong>Супруг или партнёр</strong><small>Семейный союз с выбранным человеком</small></button></div>{relationshipMode && relationshipMode !== "partner" && <><span className="nested-field-label">Вид родственной связи</span><div className="date-options relation-options"><button type="button" className={`date-option ${relationshipType === "biological" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("biological")}>Биологическая</button><button type="button" className={`date-option ${relationshipType === "adoptive" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("adoptive")}>Усыновление</button><button type="button" className={`date-option ${relationshipType === "step" ? "selected" : ""}`} onClick={() => onRelationshipTypeChange("step")}>Степ-родство</button></div></>}{relationshipMode === "partner" && <><span className="nested-field-label">Вид партнёрства</span><div className="date-options relation-options"><button type="button" className={`date-option ${partnershipType === "marriage" ? "selected" : ""}`} onClick={() => onPartnershipTypeChange("marriage")}>Брак</button><button type="button" className={`date-option ${partnershipType === "partnership" ? "selected" : ""}`} onClick={() => onPartnershipTypeChange("partnership")}>Партнёрство</button></div></>}<label className="nested-field"><span>С кем установить связь</span><select value={relationshipMode ? connectionTargetId : ""} disabled={!relationshipMode} onChange={(event) => changeConnectionTarget(event.target.value)}><option value="">Сначала выберите человека</option>{targetOptions.map((person) => <option key={person.id} value={person.id}>{person.name || "Человек без имени"}{person.year ? ` · ${person.year}` : ""}</option>)}</select></label>{errors.connectionTargetId && <small className="field-error">{errors.connectionTargetId}</small>}<small className="field-hint">{relationDescription}</small></div>}

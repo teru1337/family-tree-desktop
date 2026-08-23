@@ -98,6 +98,84 @@ function stripPersonRelations(person) {
   return profile;
 }
 
+function stripPersonForStorage(person) {
+  const { image, ...profile } = stripPersonRelations(person);
+  return profile;
+}
+
+function isEmbeddedImage(value) {
+  return typeof value === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=]+$/i.test(value);
+}
+
+function imageMimeType(dataUrl) {
+  return String(dataUrl || "").match(/^data:(image\/[a-z0-9.+-]+);base64,/i)?.[1]?.toLowerCase() || "";
+}
+
+function estimateDataUrlBytes(dataUrl) {
+  const encoded = String(dataUrl || "").split(",", 2)[1] || "";
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(encoded.length * 3 / 4) - padding);
+}
+
+function photoChecksum(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function normalizePhoto(record, index, peopleIds, usedIds = new Set()) {
+  const personId = String(record?.personId || "");
+  if (!personId || !peopleIds.has(personId)) return null;
+  const dataUrl = isEmbeddedImage(record?.dataUrl) ? record.dataUrl : "";
+  const source = typeof record?.source === "string" ? record.source.trim() : "";
+  if (!dataUrl && !source) return null;
+  let id = String(record?.id || `photo-${personId}-${index + 1}`);
+  if (usedIds.has(id)) {
+    let suffix = 1;
+    const baseId = id;
+    id = `${baseId}-${suffix}`;
+    while (usedIds.has(id)) id = `${baseId}-${++suffix}`;
+  }
+  usedIds.add(id);
+  const mimeType = dataUrl ? imageMimeType(dataUrl) : (typeof record?.mimeType === "string" ? record.mimeType : "");
+  return {
+    id,
+    personId,
+    fileName: typeof record?.fileName === "string" ? record.fileName : "",
+    mimeType,
+    dataUrl,
+    source: dataUrl ? "" : source,
+    bytes: dataUrl ? estimateDataUrlBytes(dataUrl) : Math.max(0, Number(record?.bytes) || 0),
+    checksum: dataUrl ? String(record?.checksum || photoChecksum(dataUrl)) : "",
+    primary: record?.primary !== false,
+  };
+}
+
+function normalizePhotos(records, people, peopleIds) {
+  const source = ensureArray(records).slice();
+  const explicitPersonIds = new Set(source.map((record) => String(record?.personId || "")).filter(Boolean));
+  ensureArray(people).forEach((person) => {
+    if (person?.image && !explicitPersonIds.has(String(person.id))) {
+      source.push({ id: `photo-${person.id}`, personId: person.id, dataUrl: isEmbeddedImage(person.image) ? person.image : "", source: isEmbeddedImage(person.image) ? "" : person.image, primary: true });
+    }
+  });
+  const usedIds = new Set();
+  return source.map((record, index) => normalizePhoto(record, index, peopleIds, usedIds)).filter(Boolean);
+}
+
+function attachPhotos(people, photos) {
+  const byPerson = new Map();
+  photos.forEach((photo) => {
+    if (!byPerson.has(photo.personId)) byPerson.set(photo.personId, []);
+    byPerson.get(photo.personId).push(photo);
+  });
+  return people.map((person) => {
+    const personPhotos = byPerson.get(person.id) || [];
+    const photo = [...personPhotos].sort((left, right) => Number(right.primary) - Number(left.primary) || Number(Boolean(right.dataUrl)) - Number(Boolean(left.dataUrl)))[0];
+    return { ...person, image: photo ? (photo.dataUrl || photo.source) : (person.image || "") };
+  });
+}
+
 function relationSemanticKey(relation) {
   if (relation?.kind === "parent") return `parent::${relation.parentId}::${relation.childId}::${relation.type}`;
   if (relation?.kind === "partnership") return `partnership::${[...(relation.personIds || [])].sort().join("::")}::${relation.id || ""}`;
@@ -271,6 +349,18 @@ export function validateProject(raw) {
     });
   });
 
+  // В старых файлах фотография могла находиться прямо в записи человека.
+  // Проверяем её только если для этой записи нет канонической строки photos,
+  // чтобы не дублировать предупреждения в переходном представлении интерфейса.
+  const photoPersonIds = new Set(ensureArray(raw.photos).map((photo) => String(photo?.personId || "")).filter(Boolean));
+  raw.people.forEach((person) => {
+    const personId = String(person?.id || "человека");
+    const image = typeof person?.image === "string" ? person.image.trim() : "";
+    if (!image || photoPersonIds.has(personId)) return;
+    if (image.startsWith("data:") && !isEmbeddedImage(image)) warnings.push(`Фотография человека ${personId} имеет повреждённый встроенный формат.`);
+    else if (!isEmbeddedImage(image)) warnings.push(`Фотография человека ${personId} хранится по внешнему пути и может быть недоступна на другом компьютере.`);
+  });
+
   if (version >= 3 && !Array.isArray(raw.relations)) errors.push("В файле отсутствует единая таблица связей.");
   const relationIds = new Set();
   ensureArray(raw.relations).forEach((relation, index) => {
@@ -294,6 +384,22 @@ export function validateProject(raw) {
     if (personIds.length !== 2 || personIds.some((id) => !peopleIds.has(id))) warnings.push(`Связь супругов №${index + 1} неполная и будет пропущена.`);
   });
 
+  if (raw.photos !== undefined && !Array.isArray(raw.photos)) errors.push("Раздел фотографий повреждён.");
+  const photoIds = new Set();
+  ensureArray(raw.photos).forEach((photo, index) => {
+    const photoId = String(photo?.id || "");
+    const personId = String(photo?.personId || "");
+    if (photoId && photoIds.has(photoId)) warnings.push(`В файле повторяется идентификатор фотографии: ${photoId}.`);
+    if (photoId) photoIds.add(photoId);
+    if (!personId || !peopleIds.has(personId)) warnings.push(`Фотография №${index + 1} связана с отсутствующим человеком.`);
+    const dataUrl = typeof photo?.dataUrl === "string" ? photo.dataUrl : "";
+    const source = typeof photo?.source === "string" ? photo.source.trim() : "";
+    if (!dataUrl && !source) warnings.push(`Фотография №${index + 1} не содержит изображения.`);
+    if (dataUrl && !isEmbeddedImage(dataUrl)) warnings.push(`Фотография №${index + 1} имеет повреждённый встроенный формат.`);
+    if (dataUrl && photo?.checksum && photo.checksum !== photoChecksum(dataUrl)) warnings.push(`Фотография ${photoId || `№${index + 1}`} не прошла проверку целостности.`);
+    if (!dataUrl && source) warnings.push(`Фотография ${photoId || `№${index + 1}`} хранится по внешнему пути и может быть недоступна на другом компьютере.`);
+  });
+
   return { valid: errors.length === 0, errors, warnings: [...new Set(warnings)], version };
 }
 
@@ -308,7 +414,9 @@ export function createProjectPayload(people, project = {}, relationships = proje
   const normalizedPeopleIds = new Set(normalizedPeople.map((person) => person.id));
   const sourceRelations = ensureArray(relationships).some((relation) => relation?.kind) ? relationships : deriveRelationsFromLegacy(normalizedPeople, relationships);
   const relations = normalizeRelations(sourceRelations, normalizedPeopleIds);
+  const photos = normalizePhotos(project.photos, normalizedPeople, normalizedPeopleIds);
   const peopleWithCompatibility = attachLegacyRelations(normalizedPeople, relations);
+  const peopleWithPhotos = attachPhotos(peopleWithCompatibility, photos);
   return {
     manifest: {
       format: PROJECT_FORMAT,
@@ -323,9 +431,10 @@ export function createProjectPayload(people, project = {}, relationships = proje
       fileName: project.fileName || "семейное-древо.familytree",
       settings: project.settings && typeof project.settings === "object" ? { ...project.settings } : {},
     },
-    people: peopleWithCompatibility,
+    people: peopleWithPhotos,
     relations,
     partnerships: relations.filter((relation) => relation.kind === "partnership").map(relationToPartnership),
+    photos,
   };
 }
 
@@ -355,7 +464,9 @@ export function normalizeProject(raw) {
   const peopleIds = new Set(people.map((person) => person.id));
   const sourceRelations = Array.isArray(migrated.relations) ? migrated.relations : deriveRelationsFromLegacy(people, migrated.partnerships);
   const relations = normalizeRelations(sourceRelations, peopleIds);
+  const photos = normalizePhotos(migrated.photos, people, peopleIds);
   const compatibilityPeople = attachLegacyRelations(people, relations);
+  const peopleWithPhotos = attachPhotos(compatibilityPeople, photos);
   const partnerships = relations.filter((relation) => relation.kind === "partnership").map(relationToPartnership);
   const validationWarnings = [...report.warnings];
   if (migratedFrom) validationWarnings.unshift(`Формат проекта обновлён с версии ${migratedFrom} до версии ${PROJECT_VERSION}.`);
@@ -370,9 +481,10 @@ export function normalizeProject(raw) {
       createdAt: migrated.manifest.createdAt,
       updatedAt: migrated.manifest.updatedAt,
     },
-    people: compatibilityPeople,
+    people: peopleWithPhotos,
     relations,
     partnerships,
+    photos,
     validationWarnings: [...new Set(validationWarnings)],
   };
 }
@@ -381,8 +493,9 @@ function toPersistedPayload(normalized) {
   return {
     manifest: { ...normalized.manifest, version: PROJECT_VERSION, schemaVersion: PROJECT_VERSION },
     project: { ...normalized.project },
-    people: ensureArray(normalized.people).map(stripPersonRelations),
+    people: ensureArray(normalized.people).map(stripPersonForStorage),
     relations: ensureArray(normalized.relations).map((relation) => ({ ...relation })),
+    photos: ensureArray(normalized.photos).map((photo) => ({ ...photo })),
   };
 }
 
