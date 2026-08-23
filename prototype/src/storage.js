@@ -1,4 +1,5 @@
 import { normalizePersonDate, validateDateRecord } from "./dates.js";
+import { inspectFamilyData } from "./data-quality.js";
 
 export const PROJECT_FORMAT = "familytree";
 export const PROJECT_VERSION = 4;
@@ -407,6 +408,9 @@ export function validateProject(raw) {
     if (dataUrl && photo?.checksum && photo.checksum !== photoChecksum(dataUrl)) warnings.push(`Фотография ${photoId || `№${index + 1}`} не прошла проверку целостности.`);
     if (!dataUrl && source) warnings.push(`Фотография ${photoId || `№${index + 1}`} хранится по внешнему пути и может быть недоступна на другом компьютере.`);
   });
+
+  const qualityRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
+  warnings.push(...inspectFamilyData(raw.people, qualityRelations).warnings);
 
   return { valid: errors.length === 0, errors, warnings: [...new Set(warnings)], version };
 }

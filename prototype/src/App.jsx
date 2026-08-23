@@ -1168,19 +1168,21 @@ export function App() {
   };
   const buildPayload = () => createProjectPayload(people, projectMeta, partnerships);
   const commitLocalSave = (payload, reason = "save") => {
-    writeWorkingCopy(payload);
+    const normalized = writeWorkingCopy(payload);
     const backup = addBackup(payload, reason);
     setBackups(readBackups());
     setLastBackupAt(backup?.createdAt || null);
     setLastSavedAt(payload.manifest.updatedAt);
     setDirty(false);
+    return normalized;
   };
   const saveProject = () => {
     try {
       const payload = buildPayload();
       downloadProjectFile(payload, projectMeta.fileName || "семейное-древо.familytree");
-      commitLocalSave(payload);
-      setToast(`Проект сохранён: ${projectMeta.fileName || "семейное-древо.familytree"}`);
+      const normalized = commitLocalSave(payload);
+      const warningCount = normalized.validationWarnings?.length || 0;
+      setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : `Проект сохранён: ${projectMeta.fileName || "семейное-древо.familytree"}`);
     } catch (error) {
       setToast(error.message || "Не удалось сохранить проект");
     }
