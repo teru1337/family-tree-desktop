@@ -70,6 +70,7 @@ import { appendChangeLog, normalizeRecordOrigin, recordOriginLabel } from "./cha
 import { createCollapseIndex, getCollapsedDescendantIds, getCollapsibleIds } from "./tree-collapse.js";
 import { dateMaskCaretForDigits, formatDateMask } from "./date-input.js";
 import { MAX_TREE_ZOOM, MIN_TREE_ZOOM, zoomAtPoint } from "./tree-viewport.js";
+import { DEFAULT_TREE_BRANCH_DEPTH, MAX_TREE_BRANCH_DEPTH, MIN_TREE_BRANCH_DEPTH, normalizeTreeBranchDepth } from "./tree-branch-depth.js";
 import { DEFAULT_SHORTCUTS, SHORTCUT_COMMANDS, sanitizeShortcutMap, shortcutCommandId, shortcutDisplayName, shortcutFromKeyboardEvent, validateShortcutMap } from "./shortcuts.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
@@ -87,10 +88,10 @@ function BrandMark({ className = "" }) {
 const initialPeople = [];
 
 const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, recordOrigin: { status: "manual", source: "" }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, deathYear: "", deathDatePrecision: "", deathDateFrom: "", deathDateTo: "", place: "", placeDetails: null, image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
-const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS], shortcuts: { ...DEFAULT_SHORTCUTS } };
+const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, branchDepth: String(DEFAULT_TREE_BRANCH_DEPTH), cardFields: [...DEFAULT_CARD_FIELDS], shortcuts: { ...DEFAULT_SHORTCUTS } };
 
 function normalizeAppSettings(settings = {}) {
-  return { ...defaultProjectSettings, ...(settings && typeof settings === "object" ? settings : {}), cardFields: sanitizeCardFields(settings?.cardFields), shortcuts: sanitizeShortcutMap(settings?.shortcuts) };
+  return { ...defaultProjectSettings, ...(settings && typeof settings === "object" ? settings : {}), branchDepth: normalizeTreeBranchDepth(settings?.branchDepth), cardFields: sanitizeCardFields(settings?.cardFields), shortcuts: sanitizeShortcutMap(settings?.shortcuts) };
 }
 
 const initialPartnerships = [];
@@ -855,7 +856,7 @@ function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewp
   return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{miniMapPeople.map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
 }
 
-function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, showFormerSurnames, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected, viewMode = "full", branchDepth = "all", branchIds = new Set(), contextIds = new Set(), nearbyIds = new Set(), collapsedIds = new Set(), onToggleCollapse, onResetCollapsedBranches, onViewModeChange, onBranchDepthChange }) {
+function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, showFormerSurnames, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected, viewMode = "full", branchDepth = String(DEFAULT_TREE_BRANCH_DEPTH), branchIds = new Set(), contextIds = new Set(), nearbyIds = new Set(), collapsedIds = new Set(), onToggleCollapse, onResetCollapsedBranches, onViewModeChange, onBranchDepthChange }) {
   const dragRef = useRef(null);
   const personDragRef = useRef(null);
   const viewportRef = useRef(null);
@@ -1106,11 +1107,11 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const styleLabel = treeStyle === "album" ? "Семейный альбом" : treeStyle === "minimal" ? "Сдержанный" : "Классический";
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
-      <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "branch" ? "selected" : ""} aria-pressed={viewMode === "branch"} onClick={() => onViewModeChange?.("branch")} disabled={!selectedId}>Родственная ветвь</button>{viewMode === "branch" && <label className="tree-branch-depth"><span>Глубина</span><select value={branchDepth} onChange={(event) => onBranchDepthChange?.(event.target.value)} aria-label="Глубина родственной ветви"><option value="all">Все поколения</option><option value="1">1 поколение</option><option value="2">2 поколения</option><option value="3">3 поколения</option></select></label>}{collapsedIds.size > 0 && <button type="button" className="tree-collapse-reset" onClick={onResetCollapsedBranches}>Развернуть ветви</button>}</div>
+      <div className={`tree-view-mode ${viewMode === "branch" ? "tree-view-mode-branch" : ""}`} role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "branch" ? "selected" : ""} aria-pressed={viewMode === "branch"} onClick={() => onViewModeChange?.("branch")} disabled={!selectedId}>Родственная ветвь</button>{viewMode === "branch" && <label className="tree-branch-depth"><span>Глубина</span><select value={branchDepth} onChange={(event) => onBranchDepthChange?.(event.target.value)} aria-label="Глубина родственной ветви">{Array.from({ length: MAX_TREE_BRANCH_DEPTH - MIN_TREE_BRANCH_DEPTH + 1 }, (_, index) => { const value = String(MIN_TREE_BRANCH_DEPTH + index); return <option key={value} value={value}>{value} {value === "1" ? "поколение" : "поколений"}</option>; })}</select></label>}{collapsedIds.size > 0 && <button type="button" className="tree-collapse-reset" onClick={onResetCollapsedBranches}>Развернуть ветви</button>}</div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(MAX_TREE_ZOOM, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(MIN_TREE_ZOOM, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Центрировать семейную пару" onClick={centerFamilyPair} disabled={!selectedId}><UsersThree size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
       <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} role="region" aria-label="Полотно семейного дерева. Колесо мыши изменяет масштаб, Shift+колесо перемещает полотно" tabIndex="0" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: displayLayout.width, height: displayLayout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={displayLayout.width} height={displayLayout.height} expandedLabelId={expandedLabelId} onExpandedLabelChange={setExpandedLabelId} />{displayLayout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: group.top - 38, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} onKeyboardNavigate={navigateTreeNode} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={displayLayout} positions={renderedPositions} hiddenIds={hiddenIds} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
-      <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {displayLayout.generations.length}</span><span className="tree-view-status">{viewMode === "branch" ? `Родственная ветвь · ${branchDepth === "all" ? "все поколения" : `${branchDepth} ${branchDepth === "1" ? "поколение" : "поколения"}`}` : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
+      <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {displayLayout.generations.length}</span><span className="tree-view-status">{viewMode === "branch" ? `Родственная ветвь · ${branchDepth} ${branchDepth === "1" ? "поколение" : "поколений"}` : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
   );
 }
@@ -1448,7 +1449,7 @@ export function App() {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [treeViewMode, setTreeViewMode] = useState("full");
-  const [treeBranchDepth, setTreeBranchDepth] = useState("all");
+  const [treeBranchDepth, setTreeBranchDepth] = useState(sessionSettings.branchDepth);
   const [collapsedBranches, setCollapsedBranches] = useState(() => new Set());
   const [focusRequest, setFocusRequest] = useState(null);
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -1568,7 +1569,10 @@ export function App() {
     setToast(mode === "branch" ? "Показана родственная ветвь" : "Показано всё дерево");
   };
   const changeTreeBranchDepth = (depth) => {
-    setTreeBranchDepth(depth);
+    const normalizedDepth = normalizeTreeBranchDepth(depth);
+    setTreeBranchDepth(normalizedDepth);
+    setProjectMeta((current) => ({ ...current, settings: normalizeAppSettings({ ...current.settings, branchDepth: normalizedDepth }) }));
+    setDirty(true);
     if (treeViewMode === "branch" && selectedId) setFocusRequest((current) => ({ id: selectedId, token: (current?.token || 0) + 1 }));
   };
   const toggleCollapsedBranch = (personId) => setCollapsedBranches((current) => {
@@ -1581,9 +1585,10 @@ export function App() {
   const applyHistorySnapshot = (snapshot) => {
     setPeople(snapshot.people);
     setPartnerships(snapshot.partnerships);
-    setProjectMeta(snapshot.projectMeta);
     const settings = normalizeAppSettings(snapshot.projectMeta.settings);
+    setProjectMeta({ ...snapshot.projectMeta, settings });
     setTreeStyle(settings.treeStyle || "classic");
+    setTreeBranchDepth(settings.branchDepth);
     setShowPhotos(settings.showPhotos !== false);
     setShowFormerSurnames(settings.showFormerSurnames !== false);
     setLargeText(settings.largeText === true);
@@ -2187,6 +2192,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setCollapsedBranches(new Set());
       setTreeStyle(restoredSettings.treeStyle || "classic");
+      setTreeBranchDepth(restoredSettings.branchDepth);
       setShowPhotos(restoredSettings.showPhotos !== false);
       setShowFormerSurnames(restoredSettings.showFormerSurnames !== false);
       setLargeText(restoredSettings.largeText === true);
@@ -2228,6 +2234,7 @@ export function App() {
     setProjectMeta(nextProjectMeta);
     setCollapsedBranches(new Set());
     setTreeStyle(loadedSettings.treeStyle || "classic");
+    setTreeBranchDepth(loadedSettings.branchDepth);
     setShowPhotos(loadedSettings.showPhotos !== false);
     setShowFormerSurnames(loadedSettings.showFormerSurnames !== false);
     setLargeText(loadedSettings.largeText === true);
@@ -2284,6 +2291,7 @@ export function App() {
       setProjectMeta({ ...payload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" });
       setCollapsedBranches(new Set());
       setTreeStyle(restoredSettings.treeStyle || "classic");
+      setTreeBranchDepth(restoredSettings.branchDepth);
       setShowPhotos(restoredSettings.showPhotos !== false);
       setShowFormerSurnames(restoredSettings.showFormerSurnames !== false);
       setLargeText(restoredSettings.largeText === true);
@@ -2373,11 +2381,13 @@ export function App() {
     }
     setPeople([]);
     setPartnerships([]);
-    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: normalizeAppSettings({ autoSave: autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields: [...cardFields], shortcuts }) });
+    const newProjectSettings = normalizeAppSettings({ autoSave: autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, branchDepth: treeBranchDepth, cardFields: [...cardFields], shortcuts });
+    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: newProjectSettings });
     setCollapsedBranches(new Set());
     setSelectedId("");
     resetPersonNavigation("");
     setTreeViewMode("full");
+    setTreeBranchDepth(newProjectSettings.branchDepth);
     setPan({ x: 0, y: 0 });
     setZoom(1);
     setEditing(false);
