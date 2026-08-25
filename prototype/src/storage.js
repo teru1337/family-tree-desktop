@@ -3,6 +3,7 @@ import { inspectFamilyData } from "./data-quality.js";
 import { normalizeCustomFields } from "./person-fields.js";
 import { normalizePersonNames } from "./person-names.js";
 import { normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents } from "./timeline.js";
+import { normalizePlaceDetails, sanitizeProjectSettings } from "./geocoder.js";
 
 export const PROJECT_FORMAT = "familytree";
 export const PROJECT_VERSION = 7;
@@ -38,7 +39,7 @@ function uniqueIds(value) {
 function normalizePersonMetadata(person) {
   const rawSiblingOrder = person?.siblingOrder;
   const siblingOrderNumber = rawSiblingOrder === "" || rawSiblingOrder === null || rawSiblingOrder === undefined ? null : Number(rawSiblingOrder);
-  return {
+  const normalized = {
     ...normalizePersonNames(person),
     isUnknown: person?.isUnknown === true,
     source: typeof person?.source === "string" ? person.source.trim() : "",
@@ -48,6 +49,8 @@ function normalizePersonMetadata(person) {
     factSources: normalizeFactSources(person?.factSources),
     timelineEvents: normalizeTimelineEvents(person?.timelineEvents),
   };
+  const placeDetails = normalizePlaceDetails(person?.placeDetails);
+  return placeDetails ? { ...normalized, placeDetails } : normalized;
 }
 
 function storageAvailable() {
@@ -533,7 +536,7 @@ export function createProjectPayload(people, project = {}, relationships = proje
       id: project.id || "local-family-tree",
       title: project.title || "Моё семейное древо",
       fileName: project.fileName || "семейное-древо.familytree",
-      settings: project.settings && typeof project.settings === "object" ? { ...project.settings } : {},
+      settings: sanitizeProjectSettings(project.settings),
     },
     people: peopleWithPhotos,
     relations,
@@ -581,7 +584,7 @@ export function normalizeProject(raw) {
       id: migrated.project?.id || "local-family-tree",
       title: migrated.project?.title || "Моё семейное древо",
       fileName: migrated.project?.fileName || "семейное-древо.familytree",
-      settings: migrated.project?.settings && typeof migrated.project.settings === "object" ? { ...migrated.project.settings } : {},
+      settings: sanitizeProjectSettings(migrated.project?.settings),
       createdAt: migrated.manifest.createdAt,
       updatedAt: migrated.manifest.updatedAt,
     },
@@ -617,7 +620,7 @@ export function verifyBackup(record) {
 function toPersistedPayload(normalized) {
   return {
     manifest: { ...normalized.manifest, version: PROJECT_VERSION, schemaVersion: PROJECT_VERSION },
-    project: { ...normalized.project },
+    project: { ...normalized.project, settings: sanitizeProjectSettings(normalized.project?.settings) },
     people: ensureArray(normalized.people).map(stripPersonForStorage),
     relations: ensureArray(normalized.relations).map((relation) => ({ ...relation })),
     photos: ensureArray(normalized.photos).map((photo) => ({ ...photo })),

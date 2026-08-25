@@ -20,7 +20,8 @@ function valuesFromPerson(person, partnerships) {
   ];
   const surnameHistory = (Array.isArray(person?.surnameHistory) ? person.surnameHistory : []).flatMap((item) => [item?.surname, item?.reason, item?.source, item?.note]);
   const nameParts = [person?.nameParts?.familyName, person?.nameParts?.givenName, person?.nameParts?.patronymic];
-  return [personLabel(person), person?.shortName, ...nameParts, person?.maidenName, ...surnameHistory, person?.year, person?.place, person?.occupation, person?.biography, person?.source, ...factSources, ...timelineValues, ...customValues, ...relationSources].filter(Boolean).map(normalizedText);
+  const placeDetails = [person?.placeDetails?.locality, person?.placeDetails?.region, person?.placeDetails?.country];
+  return [personLabel(person), person?.shortName, ...nameParts, person?.maidenName, ...surnameHistory, person?.year, person?.place, ...placeDetails, person?.occupation, person?.biography, person?.source, ...factSources, ...timelineValues, ...customValues, ...relationSources].filter(Boolean).map(normalizedText);
 }
 
 function personSourceText(person, partnerships) {
@@ -65,7 +66,7 @@ export function filterPeople(people, partnerships, positions, query, filters = D
     const relationMatches = matchesRelationFilter(person, partnerships, filters.relation);
     const years = birthYearBounds(person);
     const dateMatches = (!yearFrom || (years && years.to >= yearFrom)) && (!yearTo || (years && years.from <= yearTo));
-    const placeMatches = !placeValue || normalizedText(person.place).includes(placeValue);
+    const placeMatches = !placeValue || [person?.place, person?.placeDetails?.locality, person?.placeDetails?.region, person?.placeDetails?.country].filter(Boolean).map(normalizedText).join(" ").includes(placeValue);
     const occupationMatches = !occupationValue || normalizedText(person.occupation).includes(occupationValue);
     const biographyMatches = !biographyValue || normalizedText(person.biography).includes(biographyValue);
     const sourceMatches = !sourceValue || personSourceText(person, partnerships).includes(sourceValue);

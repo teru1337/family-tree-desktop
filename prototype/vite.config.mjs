@@ -14,6 +14,7 @@ export default defineConfig({
           "sibling-order": ["./src/sibling-order.js"],
           "family-view": ["./src/family-view.js"],
           "relationship-calculator": ["./src/relationship-calculator.js"],
+          geocoder: ["./src/geocoder.js"],
         },
       },
     },

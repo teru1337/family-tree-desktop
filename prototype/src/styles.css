@@ -302,3 +302,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .surname-history-row .date-range-inputs input { height: 36px; }
 .surname-history-editor.has-error .surname-history-row input, .surname-history-editor.has-error .surname-history-row select { border-color: #c98585; }
 @media (max-width: 430px) { .name-fields-grid { grid-template-columns: 1fr; }.surname-history-row { grid-template-columns: 1fr 32px; }.surname-history-row .date-range-inputs { grid-column: auto; }.surname-history-row select, .surname-history-row input:nth-of-type(4), .surname-history-row input:nth-of-type(5) { grid-column: 1 / -1; } }
+.address-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; align-items: stretch; }
+.address-search-button { min-width: 116px; justify-content: center; padding-inline: 10px; }
+.address-status { display: block; }
+.address-suggestions { display: grid; gap: 5px; margin-top: 2px; padding: 5px; border: 1px solid #d9e1d4; border-radius: 7px; background: #fbfdf9; }
+.address-suggestion { display: grid; gap: 3px; padding: 8px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #4d4a44; text-align: left; }
+.address-suggestion:hover, .address-suggestion:focus-visible { border-color: #b9c9ae; background: #f2f7ef; outline: 0; }
+.address-suggestion strong { font-size: 12px; font-weight: 650; }
+.address-suggestion small { color: #858178; font-size: 10px; font-weight: 400; line-height: 1.3; }
+.geocoder-settings { padding: 12px; border: 1px solid #d9e3d1; border-radius: 8px; background: #f7fbf4; }
