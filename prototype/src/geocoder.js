@@ -1,4 +1,6 @@
 const MAX_ADDRESS_LENGTH = 240;
+import { sanitizeShortcutMap } from "./shortcuts.js";
+
 const MAX_COMPONENT_LENGTH = 120;
 const MAX_SUGGESTIONS = 5;
 
@@ -61,6 +63,7 @@ export function sanitizeGeocoderSettings(settings = {}) {
 export function sanitizeProjectSettings(settings = {}) {
   const safe = settings && typeof settings === "object" ? { ...settings } : {};
   delete safe.geocoderApiKey;
+  safe.shortcuts = sanitizeShortcutMap(settings?.shortcuts);
   return safe;
 }
 

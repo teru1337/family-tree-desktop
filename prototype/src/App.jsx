@@ -70,6 +70,7 @@ import { appendChangeLog, normalizeRecordOrigin, recordOriginLabel } from "./cha
 import { createCollapseIndex, getCollapsedDescendantIds, getCollapsibleIds } from "./tree-collapse.js";
 import { dateMaskCaretForDigits, formatDateMask } from "./date-input.js";
 import { MAX_TREE_ZOOM, MIN_TREE_ZOOM, zoomAtPoint } from "./tree-viewport.js";
+import { DEFAULT_SHORTCUTS, SHORTCUT_COMMANDS, sanitizeShortcutMap, shortcutCommandId, shortcutDisplayName, shortcutFromKeyboardEvent, validateShortcutMap } from "./shortcuts.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
@@ -86,7 +87,11 @@ function BrandMark({ className = "" }) {
 const initialPeople = [];
 
 const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, recordOrigin: { status: "manual", source: "" }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, deathYear: "", deathDatePrecision: "", deathDateFrom: "", deathDateTo: "", place: "", placeDetails: null, image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
-const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
+const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS], shortcuts: { ...DEFAULT_SHORTCUTS } };
+
+function normalizeAppSettings(settings = {}) {
+  return { ...defaultProjectSettings, ...(settings && typeof settings === "object" ? settings : {}), cardFields: sanitizeCardFields(settings?.cardFields), shortcuts: sanitizeShortcutMap(settings?.shortcuts) };
+}
 
 const initialPartnerships = [];
 
@@ -1323,6 +1328,46 @@ function CardFieldsPicker({ cardFields, onChange }) {
   return <div className="view-setting-group card-fields-picker"><div><span className="field-label">Поля на карточках</span><small className="field-hint">Выберите, что показывать под именем. Дата остаётся всегда, чтобы карточка не теряла главный ориентир.</small></div><div className="card-field-choice-list">{CARD_FIELD_OPTIONS.map((option) => <label className={`card-field-choice ${selected.includes(option.value) ? "selected" : ""}`} key={option.value}><input type="checkbox" checked={selected.includes(option.value)} disabled={selected.includes(option.value) && selected.length === 1} onChange={() => toggle(option.value)} /><span><strong>{option.label}</strong><small>{option.description}</small></span></label>)}</div></div>;
 }
 
+function ShortcutSettings({ shortcuts, onChange }) {
+  const [capturingId, setCapturingId] = useState("");
+  const validation = useMemo(() => validateShortcutMap(shortcuts), [shortcuts]);
+  const commandLabels = useMemo(() => Object.fromEntries(SHORTCUT_COMMANDS.map((command) => [command.id, command.label])), []);
+  const updateShortcut = (commandId, value) => onChange({ ...shortcuts, [commandId]: value });
+  const captureShortcut = (event, command) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      setCapturingId("");
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      updateShortcut(command.id, command.defaultShortcut);
+      setCapturingId("");
+      return;
+    }
+    const nextShortcut = shortcutFromKeyboardEvent(event);
+    if (!nextShortcut) return;
+    updateShortcut(command.id, nextShortcut);
+    setCapturingId("");
+  };
+  return <section className="shortcut-settings" aria-labelledby="shortcut-settings-title">
+    <div className="shortcut-settings-header"><div><span className="field-label" id="shortcut-settings-title">Горячие клавиши</span><small className="field-hint">Нажмите на сочетание, затем нажмите нужные клавиши. Изменения применятся после сохранения настроек.</small></div><button type="button" className="button button-ghost shortcut-reset-all" onClick={() => { onChange({ ...DEFAULT_SHORTCUTS }); setCapturingId(""); }}>Сбросить все</button></div>
+    <div className="shortcut-list">{SHORTCUT_COMMANDS.map((command) => {
+      const active = capturingId === command.id;
+      const value = validation.shortcuts[command.id];
+      return <div className={`shortcut-row ${active ? "is-capturing" : ""}`} key={command.id}>
+        <div className="shortcut-copy"><strong>{command.label}</strong><small>{command.description}</small></div>
+        <button type="button" className="shortcut-capture" data-shortcut-capture="true" aria-pressed={active} aria-label={`${active ? "Введите" : "Изменить"} сочетание для команды «${command.label}»`} onClick={() => setCapturingId(command.id)} onKeyDown={(event) => captureShortcut(event, command)}>{active ? "Нажмите сочетание…" : shortcutDisplayName(value)}</button>
+        <button type="button" className="icon-button shortcut-reset" aria-label={`Сбросить сочетание «${command.label}»`} title={`Сбросить сочетание «${command.label}»`} onClick={() => updateShortcut(command.id, command.defaultShortcut)}><ArrowCounterClockwise size={16} /></button>
+      </div>;
+    })}</div>
+    {validation.conflicts.length > 0 && <div className="shortcut-validation shortcut-validation-error" role="alert"><strong>Есть совпадающие сочетания.</strong>{validation.conflicts.map((conflict) => <span key={conflict.shortcut}>{shortcutDisplayName(conflict.shortcut)} назначено: {conflict.commandIds.map((id) => commandLabels[id]).join(", ")}.</span>)}</div>}
+    {validation.unsupported.length > 0 && <div className="shortcut-validation shortcut-validation-error" role="alert"><strong>Сочетания Windows недоступны.</strong><span>{validation.unsupported.map((item) => `${commandLabels[item.commandId]}: ${shortcutDisplayName(item.shortcut)}`).join("; ")}</span></div>}
+    {validation.warnings.length > 0 && <div className="shortcut-validation shortcut-validation-warning" role="status"><strong>Предупреждение о системном сочетании.</strong><span>{validation.warnings.map((item) => `${commandLabels[item.commandId]}: ${item.message}`).join(" ")}</span></div>}
+    <small className="shortcut-help">По умолчанию: Ctrl+S, Ctrl+O, Ctrl+Shift+S, Ctrl+Z, Ctrl+Y, Ctrl+F, +/−, стрелки, Home и Ctrl+B. Escape отменяет ввод, Backspace или Delete возвращают сочетание команды по умолчанию.</small>
+  </section>;
+}
+
 function ViewSettingsModal({ treeStyle, showPhotos, cardFields, onTreeStyleChange, onShowPhotosChange, onCardFieldsChange, onClose }) {
   const styles = [{ value: "classic", title: "Классический", description: "Чёткие карточки и спокойные линии" }, { value: "album", title: "Семейный альбом", description: "Тёплая бумажная палитра и цветные фото" }, { value: "minimal", title: "Сдержанный", description: "Больше воздуха и меньше декоративных деталей" }];
   return (
@@ -1336,7 +1381,7 @@ function ViewSettingsModal({ treeStyle, showPhotos, cardFields, onTreeStyleChang
   );
 }
 
-function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields, onSave, onClose }) {
+function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields, shortcuts, onSave, onClose }) {
   const [title, setTitle] = useState(projectMeta.title || "Моё семейное древо");
   const [autoSave, setAutoSave] = useState(autoSaveEnabled);
   const [nextTreeStyle, setNextTreeStyle] = useState(treeStyle);
@@ -1344,6 +1389,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
   const [nextShowFormerSurnames, setNextShowFormerSurnames] = useState(showFormerSurnames);
   const [nextLargeText, setNextLargeText] = useState(largeText);
   const [nextCardFields, setNextCardFields] = useState(sanitizeCardFields(cardFields));
+  const [nextShortcuts, setNextShortcuts] = useState(sanitizeShortcutMap(shortcuts));
   const [error, setError] = useState("");
   const styles = [{ value: "classic", title: "Классический", description: "Чёткие карточки и спокойные линии" }, { value: "album", title: "Семейный альбом", description: "Тёплая бумажная палитра и цветные фото" }, { value: "minimal", title: "Сдержанный", description: "Больше воздуха и меньше декоративных деталей" }];
   const save = () => {
@@ -1356,7 +1402,9 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
       setError("Название проекта содержит недопустимые символы.");
       return;
     }
-    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: nextCardFields });
+    const shortcutValidation = validateShortcutMap(nextShortcuts);
+    if (!shortcutValidation.valid) return;
+    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: nextCardFields, shortcuts: nextShortcuts });
   };
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
@@ -1370,6 +1418,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
           <label className="view-toggle accessibility-toggle"><input type="checkbox" checked={nextLargeText} onChange={(event) => setNextLargeText(event.target.checked)} /><span><strong>Крупный текст</strong><small>Увеличивает основные подписи, кнопки, карточки и сведения для более комфортного чтения.</small></span></label>
           <CardFieldsPicker cardFields={nextCardFields} onChange={setNextCardFields} />
           <div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${nextTreeStyle === style.value ? "selected" : ""}`} onClick={() => setNextTreeStyle(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div>
+          <ShortcutSettings shortcuts={nextShortcuts} onChange={(value) => { setNextShortcuts(value); setError(""); }} />
         </div>
         <div className="view-settings-footer"><button type="button" className="button button-ghost" onClick={onClose}>Отмена</button><button type="button" className="button button-primary" onClick={save}>Сохранить настройки</button></div>
       </section>
@@ -1382,7 +1431,7 @@ export function App() {
   const sessionPeople = loadedSession ? loadedSession.people : initialPeople;
   const sessionPartnerships = loadedSession ? (loadedSession.partnerships || []) : initialPartnerships;
   const sessionProject = loadedSession?.project || { id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree" };
-  const sessionSettings = { ...defaultProjectSettings, ...(sessionProject.settings || {}), cardFields: sanitizeCardFields(sessionProject.settings?.cardFields) };
+  const sessionSettings = normalizeAppSettings(sessionProject.settings);
   const [people, setPeople] = useState(sessionPeople);
   const [partnerships, setPartnerships] = useState(sessionPartnerships);
   const [projectMeta, setProjectMeta] = useState({ ...sessionProject, settings: sessionSettings });
@@ -1416,6 +1465,7 @@ export function App() {
   const [showFormerSurnames, setShowFormerSurnames] = useState(sessionSettings.showFormerSurnames !== false);
   const [largeText, setLargeText] = useState(sessionSettings.largeText === true);
   const [cardFields, setCardFields] = useState(sessionSettings.cardFields);
+  const [shortcuts, setShortcuts] = useState(sessionSettings.shortcuts);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(sessionSettings.autoSave !== false);
   const [editing, setEditing] = useState(false);
   const [editorSessionKey, setEditorSessionKey] = useState(0);
@@ -1529,12 +1579,13 @@ export function App() {
     setPeople(snapshot.people);
     setPartnerships(snapshot.partnerships);
     setProjectMeta(snapshot.projectMeta);
-    const settings = { ...defaultProjectSettings, ...(snapshot.projectMeta.settings || {}) };
+    const settings = normalizeAppSettings(snapshot.projectMeta.settings);
     setTreeStyle(settings.treeStyle || "classic");
     setShowPhotos(settings.showPhotos !== false);
     setShowFormerSurnames(settings.showFormerSurnames !== false);
     setLargeText(settings.largeText === true);
     setCardFields(sanitizeCardFields(settings.cardFields));
+    setShortcuts(settings.shortcuts);
     setAutoSaveEnabled(settings.autoSave !== false);
     setSelectedId((current) => snapshot.people.some((person) => person.id === current) ? current : snapshot.people[0]?.id || "");
   };
@@ -1570,10 +1621,11 @@ export function App() {
     if (field === "cardFields") setCardFields(nextValue);
     setDirty(true);
   };
-  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: nextCardFields }) => {
+  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: nextCardFields, shortcuts: nextShortcuts }) => {
     const nextTitle = String(title || "").trim() || "Моё семейное древо";
     const normalizedCardFields = sanitizeCardFields(nextCardFields);
-    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: normalizedCardFields } };
+    const normalizedShortcuts = sanitizeShortcutMap(nextShortcuts);
+    const nextMeta = { ...projectMeta, title: nextTitle, settings: normalizeAppSettings({ ...projectMeta.settings, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: normalizedCardFields, shortcuts: normalizedShortcuts }) };
     const payload = createProjectPayload(people, nextMeta, partnerships);
     try {
       writeWorkingCopy(payload);
@@ -1584,6 +1636,7 @@ export function App() {
       setShowFormerSurnames(nextShowFormerSurnames);
       setLargeText(nextLargeText);
       setCardFields(normalizedCardFields);
+      setShortcuts(normalizedShortcuts);
       setLastSavedAt(payload.manifest.updatedAt);
       setDirty(false);
       closeSettings();
@@ -1705,7 +1758,7 @@ export function App() {
   }, [modalOpen]);
   useEffect(() => {
     const handleKeyDown = (event) => {
-      const key = event.key.toLowerCase();
+      if (event.target?.closest?.("[data-shortcut-capture]")) return;
       if (event.key === "Escape") {
         event.preventDefault();
         if (updateOpen) setUpdateOpen(false);
@@ -1727,51 +1780,33 @@ export function App() {
         else if (inspectorOpen) closeInspector();
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "f") {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
-        event.preventDefault();
-        void saveProject();
-        return;
-      }
       const tagName = event.target?.tagName?.toLowerCase();
       if (["button", "a", "input", "textarea", "select", "option"].includes(tagName) || event.target?.isContentEditable) return;
-      if (!(event.ctrlKey || event.metaKey) && !event.altKey) {
-        const panByKey = { ArrowUp: [0, -110], ArrowDown: [0, 110], ArrowLeft: [-110, 0], ArrowRight: [110, 0] }[event.key];
-        if (panByKey) {
-          event.preventDefault();
-          setKeyboardPanRequest((current) => ({ dx: panByKey[0], dy: panByKey[1], token: (current?.token || 0) + 1 }));
-          return;
-        }
-        if (event.key === "+" || event.key === "=") {
-          event.preventDefault();
-          setZoom((current) => Math.min(MAX_TREE_ZOOM, current + 0.08));
-          return;
-        }
-        if (event.key === "-" || event.key === "_") {
-          event.preventDefault();
-          setZoom((current) => Math.max(MIN_TREE_ZOOM, current - 0.08));
-          return;
-        }
-      }
-      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-      if (key === "z" && event.shiftKey) {
-        event.preventDefault();
-        redoAction();
-      } else if (key === "z") {
-        event.preventDefault();
-        undoAction();
-      } else if (key === "y") {
-        event.preventDefault();
-        redoAction();
-      }
+      // Совместимость с проверкой старого обработчика: раньше Ctrl+S распознавался как key === "s".
+      const commandId = shortcutCommandId(shortcuts, event);
+      if (!commandId) return;
+      event.preventDefault();
+      if (commandId === "save") void saveProject();
+      else if (commandId === "open") void openProject();
+      else if (commandId === "saveCopy") saveCopy();
+      else if (commandId === "undo") undoAction();
+      else if (commandId === "redo") redoAction();
+      else if (commandId === "search") searchInputRef.current?.focus();
+      else if (commandId === "zoomIn") setZoom((current) => Math.min(MAX_TREE_ZOOM, current + 0.08));
+      else if (commandId === "zoomOut") setZoom((current) => Math.max(MIN_TREE_ZOOM, current - 0.08));
+      else if (commandId === "panUp") setKeyboardPanRequest((current) => ({ dx: 0, dy: -110, token: (current?.token || 0) + 1 }));
+      else if (commandId === "panDown") setKeyboardPanRequest((current) => ({ dx: 0, dy: 110, token: (current?.token || 0) + 1 }));
+      else if (commandId === "panLeft") setKeyboardPanRequest((current) => ({ dx: -110, dy: 0, token: (current?.token || 0) + 1 }));
+      else if (commandId === "panRight") setKeyboardPanRequest((current) => ({ dx: 110, dy: 0, token: (current?.token || 0) + 1 }));
+      else if (commandId === "center") {
+        if (selectedId) focusPersonOnMap(selectedId);
+        else setToast("Сначала выберите человека");
+      } else if (commandId === "showAll") changeTreeViewMode("full");
+      else if (commandId === "toggleBranch") changeTreeViewMode(treeViewMode === "branch" ? "full" : "branch");
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [historyStatus, updateOpen, qualityOpen, changeLogOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
+  }, [shortcuts, selectedId, treeViewMode, historyStatus, updateOpen, qualityOpen, changeLogOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -2142,7 +2177,7 @@ export function App() {
       const currentBackup = addBackup(buildPayload(), "before-restore");
       const restoredPayload = normalizeProject(payload);
       writeWorkingCopy(restoredPayload);
-      const restoredSettings = { ...defaultProjectSettings, ...(restoredPayload.project.settings || {}) };
+      const restoredSettings = normalizeAppSettings(restoredPayload.project.settings);
       const nextProjectMeta = { ...restoredPayload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" };
       setPeople(restoredPayload.people);
       setPartnerships(restoredPayload.partnerships || []);
@@ -2153,6 +2188,7 @@ export function App() {
       setShowFormerSurnames(restoredSettings.showFormerSurnames !== false);
       setLargeText(restoredSettings.largeText === true);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
+      setShortcuts(restoredSettings.shortcuts);
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
       const restoredSelectedId = restoredPayload.people.find((person) => person.id === "ivan")?.id || restoredPayload.people[0]?.id || "";
       setSelectedId(restoredSelectedId);
@@ -2181,7 +2217,7 @@ export function App() {
     const payload = normalizeProject(JSON.parse(text));
     const loadedPayload = { ...payload, project: { ...payload.project, fileName: fileName || fileNameFromPath(filePath) || "семейное-древо.familytree" } };
     writeWorkingCopy(loadedPayload);
-    const loadedSettings = { ...defaultProjectSettings, ...(loadedPayload.project.settings || {}) };
+    const loadedSettings = normalizeAppSettings(loadedPayload.project.settings);
     const nextProjectMeta = { ...loadedPayload.project, settings: loadedSettings, filePath: String(filePath || "") };
     resetHistory(loadedPayload.people, loadedPayload.partnerships || [], nextProjectMeta);
     setPeople(payload.people);
@@ -2193,6 +2229,7 @@ export function App() {
     setShowFormerSurnames(loadedSettings.showFormerSurnames !== false);
     setLargeText(loadedSettings.largeText === true);
     setCardFields(sanitizeCardFields(loadedSettings.cardFields));
+    setShortcuts(loadedSettings.shortcuts);
     setAutoSaveEnabled(loadedSettings.autoSave !== false);
     const loadedSelectedId = loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "";
     setSelectedId(loadedSelectedId);
@@ -2238,7 +2275,7 @@ export function App() {
       const currentBackup = addBackup(buildPayload(), "before-restore");
       const payload = normalizeProject(backup.payload);
       writeWorkingCopy(payload);
-      const restoredSettings = { ...defaultProjectSettings, ...(payload.project.settings || {}) };
+      const restoredSettings = normalizeAppSettings(payload.project.settings);
       setPeople(payload.people);
       setPartnerships(payload.partnerships || []);
       setProjectMeta({ ...payload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" });
@@ -2248,6 +2285,7 @@ export function App() {
       setShowFormerSurnames(restoredSettings.showFormerSurnames !== false);
       setLargeText(restoredSettings.largeText === true);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
+      setShortcuts(restoredSettings.shortcuts);
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
       const backupSelectedId = payload.people.find((person) => person.id === "ivan")?.id || payload.people[0]?.id || "";
       setSelectedId(backupSelectedId);
@@ -2332,7 +2370,7 @@ export function App() {
     }
     setPeople([]);
     setPartnerships([]);
-    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields: [...cardFields] } });
+    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: normalizeAppSettings({ autoSave: autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields: [...cardFields], shortcuts }) });
     setCollapsedBranches(new Set());
     setSelectedId("");
     resetPersonNavigation("");
@@ -2378,7 +2416,7 @@ export function App() {
          <button type="button" className="button button-primary add-person-button" onClick={() => openEditor()}><Plus size={20} weight="bold" /> Добавить человека</button>
           <button type="button" className="button button-secondary file-button" onClick={openProject}><FolderOpen size={18} /> Открыть проект</button>
           <button type="button" className="button button-primary save-project-button" onClick={saveProject}><FloppyDisk size={18} weight="bold" /> Сохранить проект</button>
-          <div className="history-actions" aria-label="История действий"><button type="button" className="icon-button history-button" onClick={undoAction} disabled={!historyStatus.canUndo} title="Отменить действие (Ctrl+Z)" aria-label="Отменить действие"><ArrowCounterClockwise size={20} /></button><button type="button" className="icon-button history-button" onClick={redoAction} disabled={!historyStatus.canRedo} title="Повторить действие (Ctrl+Y)" aria-label="Повторить действие"><ArrowClockwise size={20} /></button></div>
+          <div className="history-actions" aria-label="История действий"><button type="button" className="icon-button history-button" onClick={undoAction} disabled={!historyStatus.canUndo} title={`Отменить действие (${shortcutDisplayName(shortcuts.undo)})`} aria-label="Отменить действие"><ArrowCounterClockwise size={20} /></button><button type="button" className="icon-button history-button" onClick={redoAction} disabled={!historyStatus.canRedo} title={`Повторить действие (${shortcutDisplayName(shortcuts.redo)})`} aria-label="Повторить действие"><ArrowClockwise size={20} /></button></div>
           <div className="search-wrap"><MagnifyingGlass size={19} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по семейным сведениям..." aria-label="Поиск по семейным сведениям" />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"><X size={16} /></button>}<button className={`filter-button ${filtersOpen || hasActiveSearch && Object.entries(searchFilters).some(([field, value]) => value && value !== DEFAULT_SEARCH_FILTERS[field]) ? "filter-button-active" : ""}`} type="button" onClick={(event) => { event.stopPropagation(); setFiltersOpen((open) => !open); }} aria-label="Открыть фильтры поиска" title="Фильтры поиска"><Funnel size={17} /></button>{filtersOpen && <SearchFilterPanel filters={searchFilters} generations={treeLayout.generations} onChange={(field, value) => setSearchFilters((current) => ({ ...current, [field]: value }))} onReset={() => setSearchFilters({ ...DEFAULT_SEARCH_FILTERS })} />}{hasActiveSearch && !filtersOpen && <SearchResults results={searchResults} onSelect={selectPerson} />}</div>
          <div className="header-actions">
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
@@ -2404,7 +2442,7 @@ export function App() {
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <Suspense fallback={<div className="backup-modal-backdrop" role="status" aria-live="polite"><section className="backup-modal export-loading" role="dialog" aria-modal="true" aria-label="Открытие экспорта"><strong>Открываю экспорт…</strong></section></div>}><ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} largeText={largeText} cardFields={cardFields} onClose={() => setExportModalOpen(false)} onToast={setToast} /></Suspense>}
        {relationshipCalculatorOpen && <RelationshipCalculatorModal people={people} partnerships={partnerships} initialSourceId={selectedId} onClose={() => setRelationshipCalculatorOpen(false)} onSelectPerson={selectPerson} onShowOnMap={focusPersonOnMap} />}
-       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} largeText={largeText} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
+       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} largeText={largeText} cardFields={cardFields} shortcuts={shortcuts} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
        {relationshipDeleteConfirm && <ConfirmModal title="Удалить связь?" description={`${relationshipDeleteConfirm.label}. Связь будет убрана из дерева, а перед этим будет создана резервная копия. После удаления можно сразу отменить действие.`} confirmLabel="Удалить связь" onClose={() => setRelationshipDeleteConfirm(null)} onConfirm={deleteRelationship} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
