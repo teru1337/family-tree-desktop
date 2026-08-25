@@ -1176,15 +1176,53 @@ function DataQualityModal({ report, peopleCount, onClose }) {
   );
 }
 
+function MainMenuBackground() {
+  return (
+    <div className="main-menu-background" aria-hidden="true">
+      <span className="main-menu-branch main-menu-branch-1" />
+      <span className="main-menu-branch main-menu-branch-2" />
+      <span className="main-menu-branch main-menu-branch-3" />
+      <span className="main-menu-branch main-menu-branch-4" />
+      <span className="main-menu-relation-line main-menu-relation-line-1" />
+      <span className="main-menu-relation-line main-menu-relation-line-2" />
+      <span className="main-menu-relation-line main-menu-relation-line-3" />
+      <span className="main-menu-ghost-card main-menu-ghost-card-1" />
+      <span className="main-menu-ghost-card main-menu-ghost-card-2" />
+      <span className="main-menu-ghost-card main-menu-ghost-card-3" />
+      <span className="main-menu-leaf main-menu-leaf-1" />
+      <span className="main-menu-leaf main-menu-leaf-2" />
+      <span className="main-menu-leaf main-menu-leaf-3" />
+      <span className="main-menu-leaf main-menu-leaf-4" />
+      <span className="main-menu-leaf main-menu-leaf-5" />
+      <span className="main-menu-leaf main-menu-leaf-6" />
+      <span className="main-menu-particle main-menu-particle-1" />
+      <span className="main-menu-particle main-menu-particle-2" />
+      <span className="main-menu-particle main-menu-particle-3" />
+      <span className="main-menu-particle main-menu-particle-4" />
+      <span className="main-menu-particle main-menu-particle-5" />
+      <span className="main-menu-particle main-menu-particle-6" />
+      <span className="main-menu-particle main-menu-particle-7" />
+      <span className="main-menu-particle main-menu-particle-8" />
+    </div>
+  );
+}
+
 function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }) {
   const [closing, setClosing] = useState(false);
+  const [animationActive, setAnimationActive] = useState(true);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setAnimationActive(false), 900);
+    return () => window.clearTimeout(timeout);
+  }, []);
   const requestClose = () => {
     if (closing) return;
     setClosing(true);
     window.setTimeout(onClose, 160);
   };
+  const skipAnimation = () => setAnimationActive(false);
   return (
-    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""}`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""} ${animationActive ? "is-animation-active" : "is-animation-skipped"}`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+      <MainMenuBackground />
       <section className="main-menu-card" role="dialog" aria-modal="true" aria-labelledby="main-menu-title" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="icon-button main-menu-close" onClick={requestClose} aria-label="Закрыть главное меню"><X size={21} /></button>
         <div className="main-menu-brand"><BrandMark className="menu-logo" /><div><h1 id="main-menu-title">Семейное древо</h1><p>Храните историю семьи на своём компьютере.</p></div></div>
@@ -1195,6 +1233,7 @@ function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }
           <button type="button" className="main-menu-action" onClick={onHelp}><Info size={21} /><span><strong>Инструкция для пользователей</strong><small>Пошаговое объяснение с иллюстрациями</small></span><CaretRight size={18} /></button>
           <button type="button" className="main-menu-action main-menu-action-exit" onClick={onExit}><X size={21} /><span><strong>Выход из приложения</strong><small>Закрыть окно программы</small></span></button>
         </div>
+        {animationActive && <button type="button" className="main-menu-skip-animation" onClick={skipAnimation}>Пропустить анимацию</button>}
       </section>
     </div>
   );

@@ -218,6 +218,9 @@ function createWindow(port) {
     minWidth: 1024,
     minHeight: 700,
     show: false,
+    frame: false,
+    fullscreen: true,
+    fullscreenable: true,
     backgroundColor: "#f7f5ee",
     autoHideMenuBar: true,
     title: "Семейное древо",
@@ -231,7 +234,6 @@ function createWindow(port) {
   });
 
   if (process.platform === "win32") mainWindow.setIcon(appIconPath);
-  mainWindow.maximize();
   mainWindow.removeMenu();
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.once("ready-to-show", () => mainWindow.show());
