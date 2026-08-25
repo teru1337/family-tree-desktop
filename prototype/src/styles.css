@@ -184,6 +184,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .export-modal { width: min(780px, 100%); }
 .export-modal-body { display: grid; gap: 18px; padding: 18px 0 20px; }
 .export-setting-group { display: grid; gap: 8px; }
+.export-setting-help { display: block; margin-top: 8px; color: #7a766d; line-height: 1.4; }
 .export-preview { display: grid; gap: 8px; padding: 12px; border: 1px solid #d9e3d1; border-radius: 9px; background: #f7fbf4; }
 .export-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.export-preview-header > div { display: grid; gap: 3px; }.export-preview-header strong { color: #4e5947; font-size: 13px; }.export-preview-mode { flex: 0 0 auto; padding: 5px 8px; border: 1px solid #cbdac1; border-radius: 999px; color: #637757; font-size: 10px; font-weight: 700; }
 .export-preview-stage { position: relative; min-height: 190px; max-height: 280px; display: grid; place-items: center; overflow: hidden; border: 1px solid #dedbd3; border-radius: 7px; background: #eeece6; }.export-preview-stage.is-loading { background: linear-gradient(110deg, #eeece6 8%, #f8f7f2 18%, #eeece6 33%); background-size: 200% 100%; animation: export-preview-shimmer 1.2s linear infinite; }

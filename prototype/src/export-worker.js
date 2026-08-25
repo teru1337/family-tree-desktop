@@ -76,9 +76,9 @@ async function buildPosterPdf(canvas, posterPlan) {
   return buildPdfFromJpegs([{ dataUrl, width: canvas.width, height: canvas.height }], pageWidth, pageHeight);
 }
 
-async function createExport({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale, fontScale, connectionGap, format, mode, paper, orientation, posterPlan }) {
+async function createExport({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, scale, fontScale, connectionGap, format, mode, paper, orientation, posterPlan }) {
   report(8, "Готовлю компоновку дерева…");
-  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScale, connectionGap });
+  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, fontScale, connectionGap });
   report(25, "Рисую дерево в фоновом процессе…");
   const canvas = await renderSvg(svg, Math.max(1, Math.round(layout.width * scale)), Math.max(1, Math.round(layout.height * scale)));
   if (format === "png") return canvas.convertToBlob({ type: "image/png" });

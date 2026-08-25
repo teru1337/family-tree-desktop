@@ -17,15 +17,15 @@ import { sanitizeCardFields } from "./person-fields.js";
 import { explainUserError } from "./ui-feedback.js";
 import { buildTreeLayout } from "./tree-layout.js";
 
-export function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, showPhotos, cardFields, onClose, onToast }) {
+export function ExportModal({ initialFormat = "pdf", people, partnerships, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields, onClose, onToast }) {
   const [format, setFormat] = useState(initialFormat);
   const [quality, setQuality] = useState(initialFormat === "print" ? "print" : "print");
   const [pdfMode, setPdfMode] = useState(initialFormat === "print" ? "tiles" : "poster");
   const [paper, setPaper] = useState("a4");
   const [orientation, setOrientation] = useState("landscape");
-  const [cardSize, setCardSize] = useState("standard");
+  const [cardSize, setCardSize] = useState("screen");
   const [spacing, setSpacing] = useState("comfortable");
-  const [fontScale, setFontScale] = useState("standard");
+  const [fontScale, setFontScale] = useState(largeText ? "large" : "standard");
   const [connectionDensity, setConnectionDensity] = useState("normal");
   const [busy, setBusy] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
@@ -34,11 +34,12 @@ export function ExportModal({ initialFormat = "pdf", people, partnerships, treeS
   const [previewError, setPreviewError] = useState("");
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const layoutOptions = useMemo(() => {
-    const cardOptions = { compact: { cardWidth: 190, cardHeight: 92 }, standard: { cardWidth: 220, cardHeight: 102 }, large: { cardWidth: 250, cardHeight: 114 } };
+    const cardOptions = { screen: { cardWidth: largeText ? 220 : 190, cardHeight: largeText ? 108 : 92 }, compact: { cardWidth: 190, cardHeight: 92 }, standard: { cardWidth: 220, cardHeight: 102 }, large: { cardWidth: 250, cardHeight: 114 } };
     const spacingOptions = { compact: { columnStep: 280, rowStep: 230, horizontalPadding: 260, verticalPadding: 180 }, comfortable: { columnStep: 350, rowStep: 280, horizontalPadding: 300, verticalPadding: 210 }, spacious: { columnStep: 430, rowStep: 340, horizontalPadding: 340, verticalPadding: 240 } };
     const base = cardOptions[cardSize];
-    return { ...base, cardHeight: base.cardHeight + Math.max(0, sanitizeCardFields(cardFields).length - 1) * 14, ...spacingOptions[spacing] };
-  }, [cardSize, spacing, cardFields]);
+    const fieldStep = cardSize === "screen" && largeText ? 16 : 14;
+    return { ...base, cardHeight: base.cardHeight + Math.max(0, sanitizeCardFields(cardFields).length - 1) * fieldStep, ...spacingOptions[spacing] };
+  }, [cardSize, spacing, cardFields, largeText]);
   const layout = useMemo(() => buildTreeLayout(people, partnerships, layoutOptions), [people, partnerships, layoutOptions]);
   const qualityInfo = EXPORT_QUALITY[quality] || EXPORT_QUALITY.print;
   const fontScaleValue = fontScale === "large" ? 1.2 : fontScale === "extra-large" ? 1.35 : 1;
@@ -70,7 +71,7 @@ export function ExportModal({ initialFormat = "pdf", people, partnerships, treeS
     let cancelled = false;
     let objectUrl = "";
     const timer = window.setTimeout(() => {
-      buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScale: fontScaleValue, connectionGap })
+      buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, fontScale: fontScaleValue, connectionGap })
         .then((svg) => {
           if (cancelled) return;
           objectUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
@@ -92,14 +93,14 @@ export function ExportModal({ initialFormat = "pdf", people, partnerships, treeS
       window.clearTimeout(timer);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScaleValue, connectionGap, previewAttempt]);
+  }, [people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, fontScaleValue, connectionGap, previewAttempt]);
 
   const runExport = async () => {
     setBusy(true);
     setExportProgress("Подготавливаю файл…");
     const baseName = `семейное-древо-${new Date().toISOString().slice(0, 10)}`;
     const createExportInMainThread = async () => {
-      const rendered = await renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap });
+      const rendered = await renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap });
       if (format === "png") return { blob: await canvasToBlob(rendered.canvas, "image/png"), fileName: `${baseName}.png`, message: "PNG-файл подготовлен" };
       if (format === "tiff") return { blob: canvasToTiff(rendered.canvas), fileName: `${baseName}.tiff`, message: "TIFF-файл подготовлен" };
       const pdf = await buildPdfFromCanvas(rendered.canvas, { mode: exportMode, paper, orientation, posterPlan });
@@ -108,7 +109,7 @@ export function ExportModal({ initialFormat = "pdf", people, partnerships, treeS
     try {
       let result;
       try {
-        result = await runBackgroundExport({ people, partnerships, layout, treeStyle, showPhotos, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap, format: format === "print" ? "pdf" : format, mode: exportMode, paper, orientation, posterPlan }, { onProgress: ({ label }) => setExportProgress(label) });
+        result = await runBackgroundExport({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, scale: qualityInfo.scale, fontScale: fontScaleValue, connectionGap, format: format === "print" ? "pdf" : format, mode: exportMode, paper, orientation, posterPlan }, { onProgress: ({ label }) => setExportProgress(label) });
       } catch (error) {
         if (!error.isBackgroundExportError) throw error;
         setExportProgress("Фоновый режим недоступен, готовлю файл…");
@@ -132,7 +133,7 @@ export function ExportModal({ initialFormat = "pdf", people, partnerships, treeS
         <div className="export-modal-body">
           <div className="export-setting-group"><span className="field-label">Формат</span><div className="export-format-list">{formatOptions.map((option) => <button type="button" key={option.value} className={`export-choice ${format === option.value ? "selected" : ""}`} onClick={() => { setFormat(option.value); if (option.value === "print") setPdfMode("tiles"); }}><strong>{option.title}</strong><small>{option.description}</small></button>)}</div></div>
           <div className="export-setting-group"><span className="field-label">Качество изображения</span><div className="export-quality-list">{Object.entries(EXPORT_QUALITY).map(([value, info]) => <button type="button" key={value} className={`export-choice export-quality-choice ${quality === value ? "selected" : ""}`} onClick={() => setQuality(value)}><strong>{info.label}</strong><small>{info.description}</small></button>)}</div></div>
-          <div className="export-setting-group"><span className="field-label">Оформление карточек и связей</span><div className="export-form-grid"><label className="field"><span>Размер карточек</span><select value={cardSize} onChange={(event) => setCardSize(event.target.value)}><option value="compact">Компактный</option><option value="standard">Стандартный</option><option value="large">Крупный</option></select></label><label className="field"><span>Отступы между поколениями</span><select value={spacing} onChange={(event) => setSpacing(event.target.value)}><option value="compact">Меньше</option><option value="comfortable">Обычные</option><option value="spacious">Больше</option></select></label><label className="field"><span>Размер шрифта</span><select value={fontScale} onChange={(event) => setFontScale(event.target.value)}><option value="standard">Стандартный</option><option value="large">Крупный</option><option value="extra-large">Очень крупный</option></select></label><label className="field"><span>Плотность связей</span><select value={connectionDensity} onChange={(event) => setConnectionDensity(event.target.value)}><option value="normal">Обычная</option><option value="spacious">Свободная</option></select></label></div></div>
+          <div className="export-setting-group"><span className="field-label">Оформление карточек и связей</span><div className="export-form-grid"><label className="field"><span>Размер карточек</span><select value={cardSize} onChange={(event) => setCardSize(event.target.value)}><option value="screen">Как на экране</option><option value="compact">Компактный</option><option value="standard">Стандартный</option><option value="large">Крупный</option></select></label><label className="field"><span>Отступы между поколениями</span><select value={spacing} onChange={(event) => setSpacing(event.target.value)}><option value="compact">Меньше</option><option value="comfortable">Обычные</option><option value="spacious">Больше</option></select></label><label className="field"><span>Размер шрифта</span><select value={fontScale} onChange={(event) => setFontScale(event.target.value)}><option value="standard">Стандартный</option><option value="large">Крупный</option><option value="extra-large">Очень крупный</option></select></label><label className="field"><span>Плотность связей</span><select value={connectionDensity} onChange={(event) => setConnectionDensity(event.target.value)}><option value="normal">Обычная</option><option value="spacious">Свободная</option></select></label></div><small className="export-setting-help">Стиль, фотографии, поля карточек, прежние фамилии и крупный текст взяты из текущих настроек вида дерева.</small></div>
           {(format === "pdf" || format === "print") && <div className="export-setting-group"><span className="field-label">Разметка страниц</span>{format === "pdf" && <div className="export-mode-list"><button type="button" className={`export-choice ${pdfMode === "poster" ? "selected" : ""}`} onClick={() => setPdfMode("poster")}><strong>Большой плакат</strong><small>Всё дерево на одном огромном листе</small></button><button type="button" className={`export-choice ${pdfMode === "tiles" ? "selected" : ""}`} onClick={() => setPdfMode("tiles")}><strong>Листы по страницам</strong><small>Разбить дерево на страницы для печати</small></button></div>}<div className="export-form-grid"><label className="field"><span>Размер листа</span><select value={paper} onChange={(event) => setPaper(event.target.value)}><option value="a4">A4</option><option value="a3">A3</option><option value="a2">A2</option></select></label><label className="field"><span>Ориентация</span><select value={orientation} onChange={(event) => setOrientation(event.target.value)}><option value="landscape">Альбомная</option><option value="portrait">Книжная</option></select></label></div></div>}
           <div className={`export-readability export-readability-${readability.level}`} role="status"><strong>Читаемость</strong><span>{readability.message}</span></div>
           <div className="export-preview" aria-live="polite"><div className="export-preview-header"><div><span className="field-label">Предпросмотр</span><strong>{previewCaption}</strong></div><span className="export-preview-mode">{exportMode === "poster" ? "Одно полотно" : exportMode === "image" ? "Одно изображение" : `${pageCount} ${pageCount === 1 ? "лист" : pageCount < 5 ? "листа" : "листов"}`}</span></div><div className={`export-preview-stage ${previewBusy ? "is-loading" : ""}`} aria-busy={previewBusy}>{previewBusy && <div className="export-preview-placeholder"><span className="preview-spinner" aria-hidden="true" /><strong>Готовлю предпросмотр…</strong><small>Компоновка дерева появится здесь</small></div>}{!previewBusy && previewError && <div className="export-preview-placeholder"><Info size={25} /><strong>Предпросмотр недоступен</strong><small>{previewError}</small><button type="button" className="button button-secondary preview-retry" onClick={() => setPreviewAttempt((attempt) => attempt + 1)}>Повторить</button></div>}{!previewBusy && !previewError && previewUrl && <img className="export-preview-image" src={previewUrl} alt={`Предпросмотр: ${previewCaption.toLowerCase()}`} />}</div><small className="export-preview-help">Показана вся компоновка дерева. Итоговый файл сохранится с выбранным качеством: {qualityInfo.label.toLowerCase()}.</small></div>

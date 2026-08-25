@@ -1,4 +1,5 @@
 import { formatCardFieldLines } from "./person-fields.js";
+import { formatPersonName as formatStructuredPersonName } from "./person-names.js";
 import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
 
 export const EXPORT_QUALITY = {
@@ -83,8 +84,8 @@ function truncate(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
-function formatPersonName(person) {
-  const source = person?.isUnknown ? "Неизвестный человек" : person?.shortName || person?.name || "Человек без имени";
+function formatPersonName(person, showFormerSurnames = true) {
+  const source = person?.isUnknown ? "Неизвестный человек" : formatStructuredPersonName(person, { showFormerSurnames });
   return String(source).split("\n").map((line) => truncate(line, 24)).filter(Boolean).slice(0, 2);
 }
 
@@ -108,7 +109,7 @@ async function imageToDataUrl(source) {
   }
 }
 
-export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true, cardFields = ["year"], fontScale = 1, connectionGap = 24 }) {
+export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true, showFormerSurnames = true, cardFields = ["year"], fontScale = 1, connectionGap = 24 }) {
   const theme = THEMES[treeStyle] || THEMES.classic;
   const safeFontScale = Math.max(0.8, Number(fontScale) || 1);
   const safeConnectionGap = Math.max(18, Number(connectionGap) || 24);
@@ -147,7 +148,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
   const nodeMarkup = people.map((person) => {
     const position = layout.positions[person.id];
     if (!position) return "";
-    const names = formatPersonName(person);
+    const names = formatPersonName(person, showFormerSurnames);
     const cardLines = formatCardFieldLines(person, cardFields);
     const photo = showPhotos ? imageMap.get(person.image) : null;
     const imageMarkup = photo
@@ -171,8 +172,8 @@ function loadSvgImage(svg) {
   });
 }
 
-export async function renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, cardFields = ["year"], scale = 1, fontScale = 1, connectionGap = 24 }) {
-  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, cardFields, fontScale, connectionGap });
+export async function renderTreeImage({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames = true, cardFields = ["year"], scale = 1, fontScale = 1, connectionGap = 24 }) {
+  const svg = await buildTreeSvg({ people, partnerships, layout, treeStyle, showPhotos, showFormerSurnames, cardFields, fontScale, connectionGap });
   const image = await loadSvgImage(svg);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(layout.width * scale));
