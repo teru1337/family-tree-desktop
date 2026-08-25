@@ -1,4 +1,4 @@
-import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   Camera,
@@ -68,6 +68,7 @@ import { applySuggestedChildSurname, formerSurnames, formatPersonName, normalize
 import { validateBasicPersonSection, validateFactSourcesSection, validateTimelineSection } from "./section-validation.js";
 import { appendChangeLog, normalizeRecordOrigin, recordOriginLabel } from "./change-log.js";
 import { createCollapseIndex, getCollapsedDescendantIds, getCollapsibleIds } from "./tree-collapse.js";
+import { dateMaskCaretForDigits, formatDateMask } from "./date-input.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
@@ -316,6 +317,27 @@ function SectionEditorFooter({ onCancel, onSave }) {
   return <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button><button type="button" className="button button-primary save-button" onClick={onSave}><FloppyDisk size={18} weight="bold" /> Сохранить</button></div>;
 }
 
+function DateMaskInput({ value, onChange, onBlur, ...props }) {
+  const inputRef = useRef(null);
+  const pendingCaret = useRef(null);
+  const maskedValue = formatDateMask(value);
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null || !inputRef.current) return;
+    const caret = pendingCaret.current;
+    pendingCaret.current = null;
+    inputRef.current.setSelectionRange(caret, caret);
+  }, [maskedValue]);
+  const handleChange = (event) => {
+    const rawValue = event.target.value;
+    const selectionStart = event.target.selectionStart ?? rawValue.length;
+    const nextValue = formatDateMask(rawValue);
+    const digitsBeforeCaret = rawValue.slice(0, selectionStart).replace(/\D/g, "").length;
+    pendingCaret.current = dateMaskCaretForDigits(nextValue, digitsBeforeCaret);
+    onChange(nextValue);
+  };
+  return <input {...props} ref={inputRef} value={maskedValue} inputMode="numeric" maxLength={10} placeholder="__.__.____" onChange={handleChange} onBlur={onBlur} />;
+}
+
 function DeathFields({ draft, update, onClear, errors = {} }) {
   const precision = draft.deathDatePrecision || inferDatePrecision(draft.deathYear);
   const clear = () => onClear?.() || update("deathDatePrecision", "unknown");
@@ -334,6 +356,7 @@ function BasicPersonSectionEditor({ person, onSave, onCancel }) {
   const [errors, setErrors] = useState({});
   const precision = draft.datePrecision || inferDatePrecision(draft.year);
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const validateDateField = (field) => setErrors((current) => ({ ...current, [field]: validateBasicPersonSection(draft)[field] || "" }));
   const save = () => {
     const nextErrors = validateBasicPersonSection(draft);
     setErrors(nextErrors);
@@ -345,7 +368,7 @@ function BasicPersonSectionEditor({ person, onSave, onCancel }) {
     <Suspense fallback={null}><NameEditorFields draft={draft} onChange={setDraft} errors={errors} /><NameEditorFields kind="history" value={draft.surnameHistory} error={errors.surnameHistory} onChange={(value) => update("surnameHistory", value)} /></Suspense>
     <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
     <Suspense fallback={null}><RecordOriginField value={draft.recordOrigin} onChange={(value) => update("recordOrigin", value)} /></Suspense>
-    <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year || ""} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
+    <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : precision === "exact" ? <DateMaskInput value={draft.year || ""} onChange={(value) => update("year", value)} onBlur={() => validateDateField("year")} aria-invalid={Boolean(errors.year)} aria-label="Дата рождения: точный день" /> : <input value={draft.year || ""} onChange={(event) => update("year", event.target.value)} placeholder={precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
     <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => setDraft((current) => ({ ...current, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }))}>Неизвестно</button></div></div>
     <DeathFields draft={draft} update={update} onClear={() => setDraft((current) => ({ ...current, deathDatePrecision: "unknown", deathYear: "", deathDateFrom: "", deathDateTo: "" }))} errors={errors} />
     <Suspense fallback={null}><AddressField draft={draft} errors={errors} onChange={setDraft} /></Suspense>
@@ -598,6 +621,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
     onChange({ ...draft, [field]: value });
     setErrors((current) => ({ ...current, [field]: "" }));
   };
+  const validateDateField = (field) => setErrors((current) => ({ ...current, [field]: validateBasicPersonSection(draft)[field] || "" }));
   const changeRelationMode = (value) => {
     if (firstPerson && value) return;
     onRelationChange(value);
@@ -704,7 +728,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <Suspense fallback={null}><NameEditorFields draft={draft} onChange={onChange} errors={errors} suggestion={isNew && relationshipMode === "child" ? surnameSuggestion : null} /><NameEditorFields kind="history" value={draft.surnameHistory} error={errors.surnameHistory} onChange={(value) => update("surnameHistory", value)} /></Suspense>
         <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
         <Suspense fallback={null}><RecordOriginField value={draft.recordOrigin} onChange={(value) => update("recordOrigin", value)} /></Suspense>
-        <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
+        <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : precision === "exact" ? <DateMaskInput value={draft.year} onChange={(value) => update("year", value)} onBlur={() => validateDateField("year")} aria-invalid={Boolean(errors.year)} aria-label="Дата рождения: точный день" /> : <input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder={precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
         <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => { onChange({ ...draft, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }); setErrors((current) => ({ ...current, year: "" })); }}>Неизвестно</button></div><small className="field-hint">Допустимо: 1926, 12.05.1926, «около 1926» или диапазон 1940–1945.</small></div>
         <DeathFields draft={draft} update={update} onClear={() => onChange({ ...draft, deathDatePrecision: "unknown", deathYear: "", deathDateFrom: "", deathDateTo: "" })} errors={errors} />
         <Suspense fallback={null}><AddressField draft={draft} errors={errors} onChange={onChange} /></Suspense>
