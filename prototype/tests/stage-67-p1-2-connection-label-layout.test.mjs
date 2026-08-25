@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { layoutConnectionLabels } from "../src/connection-labels.js";
+import { layoutConnectionLabels, partnershipLabelAnchor } from "../src/connection-labels.js";
 import { buildTreeLayout } from "../src/tree-layout.js";
 
 const appSource = fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
@@ -29,6 +29,13 @@ test("keeps a partnership label inside the enlarged gap between cards", () => {
   const [label] = layoutConnectionLabels([{ id: "marriage", short: "Брак", left: 214, top: 38, orientation: "horizontal" }], { positions: cards });
   assert.equal(intersects(rect(label), { left: 0, right: 190, top: 0, bottom: 92 }, 2), false);
   assert.equal(intersects(rect(label), { left: 238, right: 428, top: 0, bottom: 92 }, 2), false);
+});
+
+test("anchors partnership labels above the upper-left edge of the pair", () => {
+  const cards = [{ left: 0, top: 180, width: 190, height: 92 }, { left: 238, top: 180, width: 190, height: 92 }];
+  const [label] = layoutConnectionLabels([{ id: "marriage", short: "Брак", left: partnershipLabelAnchor(cards[0], cards[1]), top: 180, orientation: "horizontal", aboveCards: true, anchor: "upper-left" }], { positions: cards });
+  assert.equal(label.left, 26);
+  assert.equal(label.top + label.height / 2 < 180, true);
 });
 
 test("reserves an upper lane for a full partnership label", () => {

@@ -1,7 +1,7 @@
 import { formatCardFieldLines } from "./person-fields.js";
 import { formatPersonName as formatStructuredPersonName } from "./person-names.js";
 import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
-import { layoutConnectionLabels } from "./connection-labels.js";
+import { layoutConnectionLabels, partnershipLabelAnchor } from "./connection-labels.js";
 
 export const EXPORT_QUALITY = {
   screen: { label: "Экран", scale: 1, description: "быстрый файл для просмотра" },
@@ -140,7 +140,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
   const partnerLabelCandidates = partnerEdges.map(({ partnership, first, second }) => {
     const geometry = horizontalConnection(layout.positions[first.id], layout.positions[second.id], safeConnectionGap / 2);
     const short = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : partnership.type === "engagement" ? "Помолвка" : "Связь";
-    return { id: `partnership-${partnership.id}`, short, full: `${short}: ${formatPersonName(first, true).join(" ")} — ${formatPersonName(second, true).join(" ")}`, left: geometry.middleX, top: Math.min(layout.positions[first.id].top, layout.positions[second.id].top), orientation: "horizontal", aboveCards: true, expandedMaxWidth: 250 };
+    return { id: `partnership-${partnership.id}`, short, full: `${short}: ${formatPersonName(first, true).join(" ")} — ${formatPersonName(second, true).join(" ")}`, left: partnershipLabelAnchor(layout.positions[first.id], layout.positions[second.id]), top: Math.min(layout.positions[first.id].top, layout.positions[second.id].top), orientation: "horizontal", aboveCards: true, anchor: "upper-left", expandedMaxWidth: 250 };
   });
   const connectionLabels = layoutConnectionLabels([...parentLabelCandidates, ...partnerLabelCandidates], { positions: Object.values(layout.positions), labelGap: 8, channelGap: 24, fontScale: safeFontScale });
 

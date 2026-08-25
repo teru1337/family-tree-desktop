@@ -36,6 +36,13 @@ export function estimateConnectionLabel(text, { fontScale = 1, maxWidth = 220 } 
   };
 }
 
+export function partnershipLabelAnchor(firstPosition, secondPosition, inset = 26) {
+  const firstLeft = Number(firstPosition?.left) || 0;
+  const secondLeft = Number(secondPosition?.left) || 0;
+  const leftmost = Math.min(firstLeft, secondLeft);
+  return leftmost + Math.max(12, Number(inset) || 26);
+}
+
 function candidateOffsets(maxLanes) {
   const offsets = [0];
   for (let lane = 1; lane <= maxLanes; lane += 1) offsets.push(-lane, lane);

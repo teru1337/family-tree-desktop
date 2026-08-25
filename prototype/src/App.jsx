@@ -62,7 +62,7 @@ import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_
 import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_PLACE, MAX_EVENT_SOURCE, MAX_EVENT_TITLE, MAX_TIMELINE_EVENTS, TIMELINE_EVENT_TYPES, normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents, sortTimelineEvents } from "./timeline.js";
 import { buildTreeLayout, withExpandedPartnershipClearance } from "./tree-layout.js";
 import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
-import { layoutConnectionLabels } from "./connection-labels.js";
+import { layoutConnectionLabels, partnershipLabelAnchor } from "./connection-labels.js";
 import { applyRelationOperation, normalizeRelationState } from "./relation-operations.js";
 import { applySuggestedChildSurname, formerSurnames, formatPersonName, normalizeNameParts, normalizePersonNames, normalizeSurnameHistory, surnameSuggestionsForChild } from "./person-names.js";
 import { validateBasicPersonSection, validateFactSourcesSection, validateTimelineSection } from "./section-validation.js";
@@ -820,10 +820,11 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
         id: `partnership-${partnership.id}`,
         short,
         full: `${short}: ${personDisplayName(first)} — ${personDisplayName(second)}`,
-        left: geometry.middleX,
+        left: partnershipLabelAnchor(positions[first.id], positions[second.id]),
         top: Math.min(positions[first.id].top, positions[second.id].top),
         orientation: "horizontal",
         aboveCards: true,
+        anchor: "upper-left",
         expandedMaxWidth: 250,
         muted: edgeMuted(first.id, second.id),
       };
@@ -1210,10 +1211,6 @@ function MainMenuBackground() {
 function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose, safeMode = false }) {
   const [closing, setClosing] = useState(false);
   const [animationActive, setAnimationActive] = useState(true);
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setAnimationActive(false), 900);
-    return () => window.clearTimeout(timeout);
-  }, []);
   const requestClose = () => {
     if (closing) return;
     setClosing(true);

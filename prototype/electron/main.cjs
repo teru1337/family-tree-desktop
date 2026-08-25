@@ -110,8 +110,14 @@ function sendUpdateStatus(state, details = {}) {
 }
 
 function describeUpdateError(error) {
-  return String(error?.message || error || "Неизвестная ошибка проверки обновлений")
-    .replace(/https?:\/\/[^\s)]+/g, "ссылка на сервер обновлений");
+  const raw = String(error?.message || error || "Неизвестная ошибка проверки обновлений");
+  if (/404|ERR_UPDATER_CHANNEL_FILE_NOT_FOUND|latest\.yml/i.test(raw)) {
+    return "Сервер обновлений пока не опубликовал служебный файл latest.yml. Откройте страницу релиза или повторите проверку позже.";
+  }
+  if (/401|403|authentication|authorization|token/i.test(raw)) {
+    return "Сервер обновлений отклонил запрос. Откройте страницу релиза и повторите проверку позже.";
+  }
+  return raw.split(/\r?\n|\s+at\s+/i)[0].replace(/https?:\/\/[^\s)]+/g, "ссылка на сервер обновлений").slice(0, 260);
 }
 
 function getAppIconPath() {
