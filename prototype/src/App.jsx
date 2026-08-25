@@ -268,7 +268,7 @@ function TreeNode({ person, position, selected, branchMuted, onSelect, onKeyboar
         <span className="tree-node-details">{cardLines.map((line, index) => <span key={`${person.id}-card-line-${index}`} className={index === 0 && sanitizeCardFields(cardFields).includes("year") ? "tree-node-year" : "tree-node-detail"}>{line}</span>)}</span>
       </span>
     </button>
-    {collapsible && <button type="button" className={`tree-node-collapse ${collapsed ? "is-collapsed" : ""}`} style={{ left: position.left + position.width - 22, top: position.top - 10 }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggleCollapse?.(person.id); }} aria-label={`${collapsed ? "Развернуть" : "Свернуть"} ветвь: ${cardName}`} title={`${collapsed ? "Развернуть" : "Свернуть"} ветвь`}><span aria-hidden="true">{collapsed ? "›" : "⌄"}</span></button>}
+    {collapsible && <button type="button" className={`tree-node-collapse ${collapsed ? "is-collapsed" : ""}`} style={{ left: position.left + position.width - 22, top: position.top - 10 }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggleCollapse?.(person.id); }} aria-label={`${collapsed ? "Развернуть" : "Свернуть"} ветвь: ${cardName}`} title={`${collapsed ? "Развернуть" : "Свернуть"} ветвь`}><span className="tree-node-collapse-icon" aria-hidden="true">{collapsed ? <CaretRight size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}</span></button>}
     </>
   );
 }
