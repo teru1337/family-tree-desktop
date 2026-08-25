@@ -188,6 +188,7 @@ function siblingRole(person, type = BIOLOGICAL) {
 
 function partnerRole(person, type = "partnership") {
   if (type === "partnership") return "партнёр";
+  if (type === "engagement") return genderTerm(person, "жених", "невеста", "жених или невеста");
   return genderTerm(person, "супруг", "супруга", "супруг или супруга");
 }
 
@@ -280,7 +281,7 @@ export function formatRelationshipStep(from, to, edge) {
     return edge.parentId === from.id ? `${label}: родитель → ребёнок` : `${label}: ребёнок → родитель`;
   }
   if (edge.kind === "sibling") return edge.type === "half" ? "неполнородные брат/сестра" : edge.type === "step" ? "сводные брат/сестра" : "брат/сестра";
-  if (edge.kind === "partnership") return edge.type === "marriage" ? (edge.status === "divorced" ? "бывший брак" : "брак") : "партнёрство";
+  if (edge.kind === "partnership") return edge.type === "marriage" ? (edge.status === "divorced" ? "бывший брак" : "брак") : edge.type === "engagement" ? "помолвка" : "партнёрство";
   return "связь";
 }
 

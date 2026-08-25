@@ -71,7 +71,7 @@ function cloneValue(value) {
 
 const parentLinkTypes = new Set(["biological", "adoptive", "step", "guardian", "unknown"]);
 const siblingLinkTypes = new Set(["biological", "half", "step", "unknown"]);
-const partnershipTypes = new Set(["marriage", "partnership", "unknown"]);
+const partnershipTypes = new Set(["marriage", "engagement", "partnership", "unknown"]);
 const relationKinds = new Set(["parent", "partnership", "sibling"]);
 
 function normalizeParentLinks(person) {

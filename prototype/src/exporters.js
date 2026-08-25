@@ -154,7 +154,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
     const endX = end.left;
     const endY = end.top + end.height / 2;
     const middleX = startX + Math.max(safeConnectionGap / 2, (endX - startX) / 2);
-    const label = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : "Связь";
+    const label = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : partnership.type === "engagement" ? "Помолвка" : "Связь";
     return `<path d="M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} /><text x="${middleX}" y="${Math.min(startY, endY) - 10 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(label)}</text>`;
   }).join("");
 
