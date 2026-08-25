@@ -17,6 +17,7 @@ export default defineConfig({
           geocoder: ["./src/geocoder.js"],
           "change-log": ["./src/change-log.js"],
           storage: ["./src/storage.js"],
+          "tree-collapse": ["./src/tree-collapse.js"],
         },
       },
     },
