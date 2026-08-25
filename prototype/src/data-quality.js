@@ -102,11 +102,15 @@ function inspectTimelineEvents(people, warnings) {
   people.forEach((person) => {
     const events = Array.isArray(person?.timelineEvents) ? person.timelineEvents : [];
     const birthYears = birthYearBounds(person);
+    const deathBounds = deathDateBounds(person);
     const seenEvents = new Set();
     events.forEach((event) => {
       const eventYear = relationYear(event?.date);
       if (eventYear !== null && birthYears && eventYear < birthYears.min) {
         addWarning(warnings, `Противоречие дат: событие «${cleanText(event?.title) || "Без названия"}» у «${personLabel(person)}» указано раньше рождения (${eventYear} раньше ${birthYearsText(person)}).`);
+      }
+      if (eventYear !== null && deathBounds && eventYear > Number(deathBounds.to.slice(0, 4))) {
+        addWarning(warnings, `Противоречие дат: событие «${cleanText(event?.title) || "Без названия"}» у «${personLabel(person)}» указано после смерти (${eventYear} позже ${deathBounds.to.slice(0, 4)}).`);
       }
       const eventKey = `${normalizedKey(event?.title)}::${eventYear ?? cleanText(event?.date)}`;
       if (normalizedKey(event?.title) && seenEvents.has(eventKey)) {
@@ -114,6 +118,77 @@ function inspectTimelineEvents(people, warnings) {
       }
       if (normalizedKey(event?.title)) seenEvents.add(eventKey);
     });
+  });
+}
+
+function personSurname(person) {
+  const structured = cleanText(person?.nameParts?.familyName);
+  if (structured) return structured;
+  return cleanText(person?.name).split(" ")[0] || "";
+}
+
+function surnameValues(person) {
+  const values = new Set();
+  const current = personSurname(person);
+  if (current) values.add(normalizedKey(current));
+  (Array.isArray(person?.surnameHistory) ? person.surnameHistory : []).forEach((entry) => {
+    const surname = cleanText(entry?.surname || entry?.name);
+    if (surname) values.add(normalizedKey(surname));
+  });
+  const maidenName = cleanText(person?.maidenName);
+  if (maidenName) values.add(normalizedKey(maidenName));
+  return values;
+}
+
+function inspectSurnameConsistency(people, warnings) {
+  people.forEach((person) => {
+    const entries = Array.isArray(person?.surnameHistory) ? person.surnameHistory : [];
+    const birth = birthYearBounds(person);
+    const death = deathDateBounds(person);
+    const seen = new Map();
+    entries.forEach((entry) => {
+      const surname = cleanText(entry?.surname || entry?.name);
+      if (!surname) return;
+      const from = yearFromValue(entry?.from);
+      const to = yearFromValue(entry?.to);
+      if (from !== null && to !== null && to < from) {
+        addWarning(warnings, `Противоречие фамилии: у «${personLabel(person)}» период фамилии «${surname}» заканчивается раньше начала (${to} раньше ${from}).`);
+      }
+      if (birth && from !== null && from < birth.min && entry?.reason !== "maiden") {
+        addWarning(warnings, `Противоречие фамилии: у «${personLabel(person)}» смена на «${surname}» указана до рождения (${from} раньше ${birthYearsText(person)}).`);
+      }
+      if (death && from !== null && from > Number(death.to.slice(0, 4))) {
+        addWarning(warnings, `Противоречие фамилии: у «${personLabel(person)}» смена на «${surname}» указана после смерти (${from} позже ${death.to.slice(0, 4)}).`);
+      }
+      const key = `${normalizedKey(surname)}::${cleanText(entry?.reason) || "unknown"}`;
+      const previous = seen.get(key);
+      if (previous && (!from || !previous.to || from <= previous.to) && (!to || !previous.from || to >= previous.from)) {
+        addWarning(warnings, `Возможное дублирование истории фамилии: у «${personLabel(person)}» повторяется «${surname}» с одной причиной. Проверьте периоды.`);
+      }
+      seen.set(key, { from, to });
+    });
+  });
+}
+
+function inspectParentSurnames(peopleById, relations, warnings) {
+  const parentsByChild = new Map();
+  relations.filter((relation) => relation?.kind === "parent" && (relation.type || "biological") === "biological").forEach((relation) => {
+    const parentId = String(relation.parentId || "");
+    const childId = String(relation.childId || "");
+    if (!parentId || !childId) return;
+    const parents = parentsByChild.get(childId) || [];
+    parents.push(parentId);
+    parentsByChild.set(childId, parents);
+  });
+  parentsByChild.forEach((parentIds, childId) => {
+    const child = peopleById.get(childId);
+    const childSurname = normalizedKey(personSurname(child));
+    if (!child || !childSurname || !parentIds.length) return;
+    const parentSurnames = parentIds.map((id) => personSurname(peopleById.get(id))).filter(Boolean).map(normalizedKey);
+    if (!parentSurnames.length || parentSurnames.includes(childSurname)) return;
+    const childHistory = surnameValues(child);
+    if (parentSurnames.some((surname) => childHistory.has(surname))) return;
+    addWarning(warnings, `Проверьте фамилию: у ребёнка «${personLabel(child)}» (${personSurname(child)}) нет совпадения с фамилиями указанных биологических родителей. Возможно, нужно добавить историю смены фамилии.`);
   });
 }
 
@@ -247,6 +322,73 @@ function inspectParentRelations(peopleById, relations, warnings, errors) {
   peopleById.forEach((_, personId) => visit(personId, [personId]));
 }
 
+function inspectKinshipConflicts(peopleById, relations, warnings) {
+  const parentGraph = new Map();
+  const parentPairs = new Set();
+  const siblingPairs = new Set();
+  const biologicalParentsByChild = new Map();
+  const addPair = (left, right) => [left, right].sort().join("::");
+  relations.forEach((relation) => {
+    if (relation?.kind === "parent") {
+      const parentId = String(relation.parentId || "");
+      const childId = String(relation.childId || "");
+      if (!parentId || !childId) return;
+      parentPairs.add(`${parentId}::${childId}`);
+      const children = parentGraph.get(parentId) || [];
+      children.push(childId);
+      parentGraph.set(parentId, children);
+      if ((relation.type || "biological") === "biological") {
+        const parents = biologicalParentsByChild.get(childId) || [];
+        parents.push(parentId);
+        biologicalParentsByChild.set(childId, parents);
+      }
+      return;
+    }
+    if (relation?.kind === "sibling" && Array.isArray(relation.personIds) && relation.personIds.length === 2) {
+      siblingPairs.add(addPair(String(relation.personIds[0]), String(relation.personIds[1])));
+    }
+  });
+  parentGraph.forEach((children) => {
+    [...new Set(children)].forEach((left, index, uniqueChildren) => uniqueChildren.slice(index + 1).forEach((right) => siblingPairs.add(addPair(left, right))));
+  });
+  biologicalParentsByChild.forEach((parentIds, childId) => {
+    if (new Set(parentIds).size > 2) {
+      addWarning(warnings, `Проверьте родство: у «${personLabel(peopleById.get(childId))}» указано больше двух биологических родителей.`);
+    }
+  });
+  relations.forEach((relation) => {
+    if (relation?.kind === "sibling" && Array.isArray(relation.personIds) && relation.personIds.length === 2) {
+      const left = String(relation.personIds[0]);
+      const right = String(relation.personIds[1]);
+      if (parentPairs.has(`${left}::${right}`) || parentPairs.has(`${right}::${left}`)) {
+        addWarning(warnings, `Противоречие родства: «${personLabel(peopleById.get(left))}» и «${personLabel(peopleById.get(right))}» одновременно указаны как родитель и брат или сестра.`);
+      }
+    }
+    if (relation?.kind !== "partnership" || !Array.isArray(relation.personIds) || relation.personIds.length !== 2) return;
+    const left = String(relation.personIds[0]);
+    const right = String(relation.personIds[1]);
+    const pair = addPair(left, right);
+    if (siblingPairs.has(pair)) {
+      addWarning(warnings, `Проверьте родство: у «${personLabel(peopleById.get(left))}» и «${personLabel(peopleById.get(right))}» одновременно указаны партнёрская и братская или сестринская связь.`);
+    }
+    const reaches = (start, target) => {
+      const visited = new Set();
+      const queue = [start];
+      while (queue.length) {
+        const current = queue.shift();
+        if (current === target) return true;
+        if (visited.has(current)) continue;
+        visited.add(current);
+        (parentGraph.get(current) || []).forEach((childId) => queue.push(childId));
+      }
+      return false;
+    };
+    if (reaches(left, right) || reaches(right, left)) {
+      addWarning(warnings, `Проверьте родство: партнёрская связь соединяет «${personLabel(peopleById.get(left))}» и «${personLabel(peopleById.get(right))}», связанных по линии родитель–ребёнок.`);
+    }
+  });
+}
+
 function inspectPartnerships(peopleById, relations, warnings) {
   relations.filter((relation) => relation?.kind === "partnership").forEach((relation) => {
     const personIds = Array.isArray(relation.personIds) ? relation.personIds.map(String) : [];
@@ -278,8 +420,11 @@ export function inspectFamilyData(peopleInput, relationsInput = []) {
   inspectDuplicates(people, warnings);
   inspectTimelineEvents(people, warnings);
   inspectDeathDates(people, warnings);
+  inspectSurnameConsistency(people, warnings);
   inspectRelationConsistency(peopleById, relations, warnings, errors);
   inspectParentRelations(peopleById, relations, warnings, errors);
+  inspectParentSurnames(peopleById, relations, warnings);
+  inspectKinshipConflicts(peopleById, relations, warnings);
   inspectPartnerships(peopleById, relations, warnings);
   return { errors, warnings };
 }
