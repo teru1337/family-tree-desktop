@@ -252,13 +252,13 @@ function PersonAvatar({ person, large = false, showPhoto = true }) {
   return showPhoto && person?.image ? <img className={`person-avatar ${large ? "person-avatar-large" : ""}`} src={person.image} alt="" /> : <span className={`person-avatar person-avatar-empty ${large ? "person-avatar-large" : ""}`}><User size={large ? 32 : 20} weight="regular" /></span>;
 }
 
-function TreeNode({ person, position, selected, branchMuted, onSelect, showPhotos, showFormerSurnames, cardFields, childNumber, dragging, onDragStart, onDragMove, onDragEnd, collapsible = false, collapsed = false, onToggleCollapse }) {
+function TreeNode({ person, position, selected, branchMuted, onSelect, onKeyboardNavigate, showPhotos, showFormerSurnames, cardFields, childNumber, dragging, onDragStart, onDragMove, onDragEnd, collapsible = false, collapsed = false, onToggleCollapse }) {
   const cardLines = formatCardFieldLines(person, cardFields);
   const cardName = formatPersonName(person, { showFormerSurnames });
   const genderClass = !person.isUnknown && person.gender === "male" ? "tree-node-gender-male" : !person.isUnknown && person.gender === "female" ? "tree-node-gender-female" : "";
   return (
     <>
-    <button className={`tree-node ${genderClass} ${branchMuted ? "tree-node-branch-muted" : ""} ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${cardName}${childNumber ? `, ребёнок номер ${childNumber}` : ""}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
+    <button className={`tree-node ${genderClass} ${branchMuted ? "tree-node-branch-muted" : ""} ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} data-person-id={person.id} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onKeyDown={(event) => onKeyboardNavigate?.(person.id, event)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" aria-label={`${cardName}${childNumber ? `, ребёнок номер ${childNumber}` : ""}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
       {childNumber && <span className="tree-node-child-number" aria-label={`Ребёнок номер ${childNumber}`}>№{childNumber}</span>}
       {hasDeathInformation(person) && <span className="tree-node-death-marker" aria-label="Дата смерти указана" title="Дата смерти указана">†</span>}
       <PersonAvatar person={person} showPhoto={showPhotos} />
@@ -883,6 +883,31 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     return new Set([...modeIds].filter((id) => viewportIds.has(id)));
   }, [renderedPositions, hiddenIds, pan.x, pan.y, zoom, viewportSize, viewMode, nearbyIds]);
   const visiblePeople = useMemo(() => visibleIds ? people.filter((person) => visibleIds.has(person.id) && !hiddenIds.has(person.id)) : people.filter((person) => !hiddenIds.has(person.id)), [people, visibleIds, hiddenIds]);
+  const navigateTreeNode = (personId, event) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const current = renderedPositions[personId];
+    if (!current) return;
+    const currentGeneration = current.generation;
+    const candidates = visiblePeople.map((person) => ({ person, position: renderedPositions[person.id] })).filter(({ person, position }) => person.id !== personId && position);
+    let target = null;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const sameGeneration = candidates.filter(({ position }) => position.generation === currentGeneration).sort((first, second) => first.position.left - second.position.left);
+      const currentIndex = sameGeneration.findIndex(({ position }) => position.left > current.left);
+      const orderedIndex = event.key === "ArrowRight" ? currentIndex : currentIndex - 1;
+      if (event.key === "ArrowLeft" && currentIndex === -1) target = sameGeneration.at(-1);
+      else if (event.key === "ArrowRight") target = sameGeneration[orderedIndex];
+      else target = sameGeneration[orderedIndex];
+    } else {
+      const generationDelta = event.key === "ArrowUp" ? -1 : 1;
+      const nextGeneration = candidates.filter(({ position }) => position.generation === currentGeneration + generationDelta);
+      target = nextGeneration.sort((first, second) => Math.abs((first.position.left + first.position.width / 2) - (current.left + current.width / 2)) - Math.abs((second.position.left + second.position.width / 2) - (current.left + current.width / 2)))[0];
+    }
+    if (!target) return;
+    onSelect(target.person.id);
+    [...document.querySelectorAll(".tree-node")].find((node) => node.dataset.personId === target.person.id)?.focus();
+  };
   useEffect(() => {
     const knownIds = new Set(Object.keys(layout.positions));
     setManualOffsets((current) => {
@@ -1024,7 +1049,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "branch" ? "selected" : ""} aria-pressed={viewMode === "branch"} onClick={() => onViewModeChange?.("branch")} disabled={!selectedId}>Родственная ветвь</button>{viewMode === "branch" && <label className="tree-branch-depth"><span>Глубина</span><select value={branchDepth} onChange={(event) => onBranchDepthChange?.(event.target.value)} aria-label="Глубина родственной ветви"><option value="all">Все поколения</option><option value="1">1 поколение</option><option value="2">2 поколения</option><option value="3">3 поколения</option></select></label>}{collapsedIds.size > 0 && <button type="button" className="tree-collapse-reset" onClick={onResetCollapsedBranches}>Развернуть ветви</button>}</div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Центрировать семейную пару" onClick={centerFamilyPair} disabled={!selectedId}><UsersThree size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} role="region" aria-label="Полотно семейного дерева. Стрелки на карточке переходят между родственниками" tabIndex="0" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} onKeyboardNavigate={navigateTreeNode} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} hiddenIds={hiddenIds} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{viewMode === "branch" ? `Родственная ветвь · ${branchDepth === "all" ? "все поколения" : `${branchDepth} ${branchDepth === "1" ? "поколение" : "поколения"}`}` : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
@@ -1575,6 +1600,57 @@ export function App() {
       // Настройка ширины панели не должна мешать работе приложения.
     }
   }, [inspectorWidth]);
+  const modalOpen = Boolean(updateOpen || qualityOpen || changeLogOpen || pendingUnsavedAction || deleteConfirmId || relationshipDeleteConfirm || newTreeConfirmOpen || exportModalOpen || instructionOpen || settingsOpen || backupOpen || archiveOpen || viewSettingsOpen || relationshipCalculatorOpen || mainMenuOpen);
+  const modalReturnFocusRef = useRef(null);
+  useEffect(() => {
+    if (!modalOpen || typeof document === "undefined") return undefined;
+    const getTopDialog = () => [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].filter((dialog) => dialog.getClientRects().length > 0).at(-1);
+    const getFocusable = (dialog) => [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')].filter((element) => element.getClientRects().length > 0);
+    const focusFirst = (dialog) => {
+      const first = getFocusable(dialog)[0];
+      if (first) first.focus();
+      else { dialog.setAttribute("tabindex", "-1"); dialog.focus(); }
+    };
+    const frame = window.requestAnimationFrame(() => {
+      const dialog = getTopDialog();
+      if (!dialog) return;
+      modalReturnFocusRef.current = document.activeElement instanceof HTMLElement && !dialog.contains(document.activeElement) ? document.activeElement : null;
+      focusFirst(dialog);
+    });
+    const handleFocusIn = (event) => {
+      const dialog = getTopDialog();
+      if (dialog && !dialog.contains(event.target)) focusFirst(dialog);
+    };
+    const handleTab = (event) => {
+      if (event.key !== "Tab") return;
+      const dialog = getTopDialog();
+      if (!dialog) return;
+      const focusable = getFocusable(dialog);
+      if (!focusable.length) {
+        event.preventDefault();
+        focusFirst(dialog);
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("focusin", handleFocusIn, true);
+    document.addEventListener("keydown", handleTab, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("focusin", handleFocusIn, true);
+      document.removeEventListener("keydown", handleTab, true);
+      if (modalReturnFocusRef.current?.isConnected) modalReturnFocusRef.current.focus();
+      modalReturnFocusRef.current = null;
+    };
+  }, [modalOpen]);
   useEffect(() => {
     const handleKeyDown = (event) => {
       const key = event.key.toLowerCase();
@@ -1605,7 +1681,7 @@ export function App() {
         return;
       }
       const tagName = event.target?.tagName?.toLowerCase();
-      if (tagName === "input" || tagName === "textarea" || tagName === "select" || event.target?.isContentEditable) return;
+      if (["button", "a", "input", "textarea", "select", "option"].includes(tagName) || event.target?.isContentEditable) return;
       if (!(event.ctrlKey || event.metaKey) && !event.altKey) {
         const panByKey = { ArrowUp: [0, -110], ArrowDown: [0, 110], ArrowLeft: [-110, 0], ArrowRight: [110, 0] }[event.key];
         if (panByKey) {
@@ -2218,6 +2294,7 @@ export function App() {
 
   return (
     <div className={`app-window ${inspectorResizing ? "is-resizing" : ""} ${largeText ? "app-large-text" : ""}`} onClick={() => { if (moreOpen) setMoreOpen(false); }}>
+       <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{selectedPerson ? `Выбран человек: ${personDisplayName(selectedPerson)}${selectedPerson.year ? `, ${selectedPerson.year}` : ""}.` : "Человек не выбран."}</div>
        <header className="app-header" onClick={(event) => event.stopPropagation()}>
          <button type="button" className="brand brand-button" onClick={() => setMainMenuOpen(true)} aria-label="Открыть главное меню"><BrandMark className="brand-logo" /><span>Семейное древо</span></button>
          <div className="header-divider" />
