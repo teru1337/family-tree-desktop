@@ -86,12 +86,12 @@ function inspectDuplicates(people, warnings) {
         differentPlaces ? `разные места рождения («${cleanText(other.place)}» и «${cleanText(person.place)}»)` : "",
       ].filter(Boolean);
       if (contradictoryFacts.length > 0) {
-        addWarning(warnings, `Противоречие данных: у записей «${personLabel(other)}» (ID ${other.id}) и «${personLabel(person)}» (ID ${person.id}) совпадает ФИО, но указаны ${contradictoryFacts.join(" и ")}. Проверьте, не дублируются ли записи.`);
+        addWarning(warnings, `Противоречие данных: у записей «${personLabel(other)}» и «${personLabel(person)}» совпадает ФИО, но указаны ${contradictoryFacts.join(" и ")}. Проверьте, не дублируются ли записи.`);
       }
       const hasNoSupportingData = !birthYearBounds(person) && !birthYearBounds(other) && !normalizedKey(person?.place) && !normalizedKey(other?.place);
       if (!sameBirthYear(person, other) && !samePlace && !hasNoSupportingData) return;
       const facts = [sameBirthYear(person, other) ? "дату рождения" : "", samePlace ? "место рождения" : ""].filter(Boolean).join(" и ") || "ФИО";
-      addWarning(warnings, `Возможный дубликат: «${personLabel(other)}» (ID ${other.id}) и «${personLabel(person)}» (ID ${person.id}). Совпадают ${facts}; проверьте, не одна ли это запись.`);
+      addWarning(warnings, `Возможный дубликат: «${personLabel(other)}» и «${personLabel(person)}». Совпадают ${facts}; проверьте, не одна ли это запись.`);
     });
     sameNamePeople.push(person);
     byName.set(nameKey, sameNamePeople);
@@ -212,7 +212,7 @@ function inspectRelationConsistency(peopleById, relations, warnings, errors) {
   relations.forEach((relation, index) => {
     const relationId = cleanText(relation?.id);
     if (relationId) {
-      if (relationIds.has(relationId)) addError(errors, `У связей №${relationIds.get(relationId)} и текущей связи совпадает идентификатор: ${relationId}.`);
+      if (relationIds.has(relationId)) addError(errors, `У связей №${relationIds.get(relationId)} и текущей связи совпадает технический ключ. Исправьте дублирующую запись.`);
       else relationIds.set(relationId, index + 1);
     }
     if (relation?.kind === "parent") {
@@ -230,7 +230,7 @@ function inspectRelationConsistency(peopleById, relations, warnings, errors) {
       }
       const missingIds = [parentId, childId].filter((id) => !peopleById.has(id));
       if (missingIds.length) {
-        addError(errors, `Родительская связь ссылается на отсутствующего человека: ${missingIds.join(", ")}.`);
+        addError(errors, "Родительская связь ссылается на отсутствующего человека. Проверьте участников связи.");
         return;
       }
       const type = cleanText(relation.type) || "unknown";
@@ -238,7 +238,7 @@ function inspectRelationConsistency(peopleById, relations, warnings, errors) {
       if (parentRelations.has(key)) {
         const parent = peopleById.get(parentId);
         const child = peopleById.get(childId);
-        addWarning(warnings, `Возможный дубликат связи: между «${personLabel(parent)}» и «${personLabel(child)}» повторяется один и тот же тип родства. Проверьте ID связей.`);
+        addWarning(warnings, `Возможный дубликат связи: между «${personLabel(parent)}» и «${personLabel(child)}» повторяется один и тот же тип родства. Проверьте записи связей.`);
         addError(errors, "Каноническая родительская связь дублирует уже существующую связь.");
       } else {
         parentRelations.set(key, relation.id || key);
@@ -256,7 +256,7 @@ function inspectRelationConsistency(peopleById, relations, warnings, errors) {
     }
     const missingIds = personIds.filter((id) => !peopleById.has(id));
     if (missingIds.length) {
-      addError(errors, `Связь ссылается на отсутствующего человека: ${missingIds.join(", ")}.`);
+      addError(errors, "Связь ссылается на отсутствующего человека. Проверьте участников связи.");
       return;
     }
     if (relation.kind === "sibling") {
@@ -273,7 +273,7 @@ function inspectRelationConsistency(peopleById, relations, warnings, errors) {
     if (activePartnerships.has(pairKey)) {
       const first = peopleById.get(personIds[0]);
       const second = peopleById.get(personIds[1]);
-      addWarning(warnings, `Возможный дубликат связи: у «${personLabel(first)}» и «${personLabel(second)}» несколько активных записей о браке или партнёрстве. Проверьте даты и ID связей.`);
+      addWarning(warnings, `Возможный дубликат связи: у «${personLabel(first)}» и «${personLabel(second)}» несколько активных записей о браке или партнёрстве. Проверьте даты и записи связей.`);
       addError(errors, "Канонические активные партнёрские связи одной пары противоречат друг другу: завершите предыдущую связь или оставьте одну активную запись.");
     } else {
       activePartnerships.set(pairKey, relation.id || pairKey);

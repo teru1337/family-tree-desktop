@@ -62,10 +62,10 @@ const danglingReference = {
 };
 const validation = validateProject(danglingReference);
 assert.equal(validation.valid, true);
-assert.ok(validation.warnings.some((warning) => warning.includes("missing-person")));
+assert.ok(validation.warnings.some((warning) => warning.includes("ссылка на отсутствующего человека")));
 
 assert.throws(() => normalizeProject({ ...payload, manifest: { ...payload.manifest, version: 99 } }), /более новой версии/);
-assert.throws(() => normalizeProject({ ...payload, people: [{ id: "same" }, { id: "same" }] }), /повторяющиеся идентификаторы/);
+assert.throws(() => normalizeProject({ ...payload, people: [{ id: "same" }, { id: "same" }] }), /повторяющиеся технические ключи/);
 
 store.delete(`${WORKING_COPY_KEY}-tmp`);
 store.set(BACKUPS_KEY, JSON.stringify([

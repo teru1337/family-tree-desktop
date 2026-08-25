@@ -432,40 +432,41 @@ export function validateProject(raw) {
   raw.people.forEach((person, index) => {
     const id = String(person?.id || "");
     if (!id) warnings.push(`У человека №${index + 1} отсутствует идентификатор; он будет создан автоматически.`);
-    if (id && peopleIds.has(id)) errors.push(`В файле обнаружены повторяющиеся идентификаторы людей: ${id}.`);
+    if (id && peopleIds.has(id)) errors.push("В файле обнаружены повторяющиеся технические ключи людей.");
     if (id) peopleIds.add(id);
   });
 
-  raw.people.forEach((person) => {
-    const personId = String(person?.id || "человека");
-    if (person?.customFields !== undefined && !Array.isArray(person.customFields)) warnings.push(`Дополнительные поля записи ${personId} указаны не списком и будут сброшены.`);
-    if (person?.factSources !== undefined && (!person.factSources || typeof person.factSources !== "object" || Array.isArray(person.factSources))) warnings.push(`Источники отдельных сведений записи ${personId} указаны неправильно и будут сброшены.`);
-    if (person?.timelineEvents !== undefined && !Array.isArray(person.timelineEvents)) warnings.push(`Временная шкала записи ${personId} указана не списком и будет сброшена.`);
-    if (person?.nameParts !== undefined && (!person.nameParts || typeof person.nameParts !== "object" || Array.isArray(person.nameParts))) warnings.push(`Части ФИО записи ${personId} указаны неправильно и будут восстановлены из совместимого имени.`);
-    if (person?.surnameHistory !== undefined && !Array.isArray(person.surnameHistory)) warnings.push(`История фамилии записи ${personId} указана не списком и будет сброшена.`);
-    if (person?.nameOrigin !== undefined && (!person.nameOrigin || typeof person.nameOrigin !== "object" || Array.isArray(person.nameOrigin))) warnings.push(`Происхождение ФИО записи ${personId} указано неправильно и будет заменено безопасным значением.`);
+  raw.people.forEach((person, index) => {
+    const recordLabel = `записи №${index + 1}`;
+    const personId = String(person?.id || "");
+    if (person?.customFields !== undefined && !Array.isArray(person.customFields)) warnings.push(`Дополнительные поля ${recordLabel} указаны не списком и будут сброшены.`);
+    if (person?.factSources !== undefined && (!person.factSources || typeof person.factSources !== "object" || Array.isArray(person.factSources))) warnings.push(`Источники отдельных сведений ${recordLabel} указаны неправильно и будут сброшены.`);
+    if (person?.timelineEvents !== undefined && !Array.isArray(person.timelineEvents)) warnings.push(`Временная шкала ${recordLabel} указана не списком и будет сброшена.`);
+    if (person?.nameParts !== undefined && (!person.nameParts || typeof person.nameParts !== "object" || Array.isArray(person.nameParts))) warnings.push(`Части ФИО ${recordLabel} указаны неправильно и будут восстановлены из совместимого имени.`);
+    if (person?.surnameHistory !== undefined && !Array.isArray(person.surnameHistory)) warnings.push(`История фамилии ${recordLabel} указана не списком и будет сброшена.`);
+    if (person?.nameOrigin !== undefined && (!person.nameOrigin || typeof person.nameOrigin !== "object" || Array.isArray(person.nameOrigin))) warnings.push(`Происхождение ФИО ${recordLabel} указано неправильно и будет заменено безопасным значением.`);
     if (person?.siblingOrder !== undefined && person?.siblingOrder !== null && person?.siblingOrder !== "") {
       const siblingOrder = Number(person.siblingOrder);
-      if (!Number.isInteger(siblingOrder) || siblingOrder < 1 || siblingOrder > 999) warnings.push(`Порядок записи ${personId} среди братьев и сестёр указан неправильно и будет сброшен.`);
+      if (!Number.isInteger(siblingOrder) || siblingOrder < 1 || siblingOrder > 999) warnings.push(`Порядок ${recordLabel} среди братьев и сестёр указан неправильно и будет сброшен.`);
     }
     [...uniqueIds(person?.parentIds), ...uniqueIds(person?.partnerIds), ...uniqueIds(person?.childIds), ...uniqueIds(person?.siblingIds)].forEach((referenceId) => {
-      if (!peopleIds.has(referenceId)) warnings.push(`У записи ${personId} есть ссылка на отсутствующего человека: ${referenceId}.`);
+      if (!peopleIds.has(referenceId)) warnings.push(`У ${recordLabel} есть ссылка на отсутствующего человека.`);
     });
     ensureArray(person?.parentLinks).forEach((link) => {
-      if (!link?.personId) warnings.push(`У записи ${personId} есть связь без идентификатора человека.`);
-      else if (!peopleIds.has(String(link.personId))) warnings.push(`У записи ${personId} есть связь с отсутствующим человеком: ${link.personId}.`);
+      if (!link?.personId) warnings.push(`У ${recordLabel} есть связь без указанного участника.`);
+      else if (!peopleIds.has(String(link.personId))) warnings.push(`У ${recordLabel} есть связь с отсутствующим человеком.`);
     });
     ensureArray(person?.siblingLinks).forEach((link) => {
-      if (!link?.personId) warnings.push(`У записи ${personId} есть братская или сестринская связь без идентификатора человека.`);
-      else if (!peopleIds.has(String(link.personId))) warnings.push(`У записи ${personId} есть братская или сестринская связь с отсутствующим человеком: ${link.personId}.`);
+      if (!link?.personId) warnings.push(`У ${recordLabel} есть братская или сестринская связь без указанного участника.`);
+      else if (!peopleIds.has(String(link.personId))) warnings.push(`У ${recordLabel} есть братская или сестринская связь с отсутствующим человеком.`);
     });
     const dateReport = validateDateRecord(person?.birthDate, person?.year, person?.datePrecision);
     if (!dateReport.valid && (person?.birthDate !== undefined || person?.year || person?.datePrecision)) {
-      warnings.push(`Дата рождения записи ${personId} заполнена неправильно: ${dateReport.error}`);
+      warnings.push(`Дата рождения ${recordLabel} заполнена неправильно: ${dateReport.error}`);
     }
     const deathReport = validateDateRecord(person?.deathDate, person?.deathYear, person?.deathDatePrecision);
     if (!deathReport.valid && (person?.deathDate !== undefined || person?.deathYear || person?.deathDatePrecision)) {
-      warnings.push(`Дата смерти записи ${personId} заполнена неправильно: ${deathReport.error}`);
+      warnings.push(`Дата смерти ${recordLabel} заполнена неправильно: ${deathReport.error}`);
     }
   });
 
@@ -474,11 +475,11 @@ export function validateProject(raw) {
   // чтобы не дублировать предупреждения в переходном представлении интерфейса.
   const photoPersonIds = new Set(ensureArray(raw.photos).map((photo) => String(photo?.personId || "")).filter(Boolean));
   raw.people.forEach((person) => {
-    const personId = String(person?.id || "человека");
+    const personId = String(person?.id || "");
     const image = typeof person?.image === "string" ? person.image.trim() : "";
     if (!image || photoPersonIds.has(personId)) return;
-    if (image.startsWith("data:") && !isEmbeddedImage(image)) warnings.push(`Фотография человека ${personId} имеет повреждённый встроенный формат.`);
-    else if (!isEmbeddedImage(image)) warnings.push(`Фотография человека ${personId} хранится по внешнему пути и может быть недоступна на другом компьютере.`);
+    if (image.startsWith("data:") && !isEmbeddedImage(image)) warnings.push("Фотография человека имеет повреждённый встроенный формат.");
+    else if (!isEmbeddedImage(image)) warnings.push("Фотография человека хранится по внешнему пути и может быть недоступна на другом компьютере.");
   });
 
   if (version >= 3 && !Array.isArray(raw.relations)) errors.push("В файле отсутствует единая таблица связей.");
@@ -495,15 +496,15 @@ export function validateProject(raw) {
   ensureArray(raw.photos).forEach((photo, index) => {
     const photoId = String(photo?.id || "");
     const personId = String(photo?.personId || "");
-    if (photoId && photoIds.has(photoId)) warnings.push(`В файле повторяется идентификатор фотографии: ${photoId}.`);
+    if (photoId && photoIds.has(photoId)) warnings.push("В файле повторяется технический ключ фотографии.");
     if (photoId) photoIds.add(photoId);
     if (!personId || !peopleIds.has(personId)) warnings.push(`Фотография №${index + 1} связана с отсутствующим человеком.`);
     const dataUrl = typeof photo?.dataUrl === "string" ? photo.dataUrl : "";
     const source = typeof photo?.source === "string" ? photo.source.trim() : "";
     if (!dataUrl && !source) warnings.push(`Фотография №${index + 1} не содержит изображения.`);
     if (dataUrl && !isEmbeddedImage(dataUrl)) warnings.push(`Фотография №${index + 1} имеет повреждённый встроенный формат.`);
-    if (dataUrl && photo?.checksum && photo.checksum !== photoChecksum(dataUrl)) warnings.push(`Фотография ${photoId || `№${index + 1}`} не прошла проверку целостности.`);
-    if (!dataUrl && source) warnings.push(`Фотография ${photoId || `№${index + 1}`} хранится по внешнему пути и может быть недоступна на другом компьютере.`);
+    if (dataUrl && photo?.checksum && photo.checksum !== photoChecksum(dataUrl)) warnings.push(`Фотография №${index + 1} не прошла проверку целостности.`);
+    if (!dataUrl && source) warnings.push(`Фотография №${index + 1} хранится по внешнему пути и может быть недоступна на другом компьютере.`);
   });
 
   const qualityRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);

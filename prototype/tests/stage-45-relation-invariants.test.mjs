@@ -39,7 +39,7 @@ test("rejects duplicate relation identifiers, exact duplicate partnerships, and 
     { id: "same", kind: "parent", parentId: "grandparent", childId: "parent", type: "biological" },
     { id: "same", kind: "parent", parentId: "parent", childId: "child", type: "biological" },
   ]);
-  assert.ok(duplicateId.errors.some((error) => error.includes("совпадает идентификатор")));
+  assert.ok(duplicateId.errors.some((error) => error.includes("совпадает технический ключ")));
 
   const duplicatePartnership = validateRelationGraph(people, [
     { id: "marriage-1", kind: "partnership", personIds: ["child", "partner"], type: "marriage", status: "active" },
@@ -81,7 +81,7 @@ test("keeps legacy dangling references as warnings for backward compatibility", 
   const report = validateProject(legacyReference);
 
   assert.equal(report.valid, true);
-  assert.ok(report.warnings.some((warning) => warning.includes("missing-person")));
+  assert.ok(report.warnings.some((warning) => warning.includes("ссылка на отсутствующего человека")));
 });
 
 console.log("Stage 45 relation invariants ok: canonical graph errors are explicit and legacy references remain compatible");
