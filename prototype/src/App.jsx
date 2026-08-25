@@ -66,7 +66,7 @@ import { applyRelationOperation, normalizeRelationState } from "./relation-opera
 import { applySuggestedChildSurname, formerSurnames, formatPersonName, normalizeNameParts, normalizePersonNames, normalizeSurnameHistory, surnameSuggestionsForChild } from "./person-names.js";
 import { validateBasicPersonSection, validateFactSourcesSection, validateTimelineSection } from "./section-validation.js";
 import { appendChangeLog, normalizeRecordOrigin, recordOriginLabel } from "./change-log.js";
-import { getCollapsedDescendantIds, hasDescendants } from "./tree-collapse.js";
+import { createCollapseIndex, getCollapsedDescendantIds, getCollapsibleIds } from "./tree-collapse.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
@@ -766,11 +766,11 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
   const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships, byId), [people, partnerships, byId]);
   const index = renderIndex || fallbackIndex;
   const edgeVisible = (edge, firstId, secondId) => !hiddenIds.has(firstId) && !hiddenIds.has(secondId) && (!strictVisible || !visibleIds || (visibleIds.has(firstId) && visibleIds.has(secondId)));
-  const parentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds).filter((edge) => positions[edge.parent.id] && positions[edge.child.id] && edgeVisible(edge, edge.parent.id, edge.child.id)), [index, positions, visibleIds, strictVisible]);
-  const partnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds).filter((edge) => positions[edge.first.id] && positions[edge.second.id] && edgeVisible(edge, edge.first.id, edge.second.id)), [index, positions, visibleIds, strictVisible]);
+  const parentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds, index.parentEdgesByPerson).filter((edge) => positions[edge.parent.id] && positions[edge.child.id] && edgeVisible(edge, edge.parent.id, edge.child.id)), [index, positions, visibleIds, hiddenIds, strictVisible]);
+  const partnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds, index.partnershipEdgesByPerson).filter((edge) => positions[edge.first.id] && positions[edge.second.id] && edgeVisible(edge, edge.first.id, edge.second.id)), [index, positions, visibleIds, hiddenIds, strictVisible]);
   const branchVisible = (id) => branchIds.has(id) || contextIds.has(id);
   const edgeMuted = (firstId, secondId) => branchMode && !branchVisible(firstId) && !branchVisible(secondId);
-  const labels = [
+  const labels = useMemo(() => [
     ...parentEdges.map(({ parent, child, type }) => {
       const geometry = verticalConnection(positions[parent.id], positions[child.id]);
       const roles = parentRelationshipRoles(type, parent, child);
@@ -795,7 +795,7 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
         muted: edgeMuted(first.id, second.id),
       };
     }),
-  ];
+  ], [parentEdges, partnerEdges, positions, branchMode, branchIds, contextIds]);
   return <><svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const geometry = verticalConnection(positions[parent.id], positions[child.id]); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""} ${edgeMuted(parent.id, child.id) ? "connection-branch-muted" : ""}`} d={geometry.path} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const geometry = horizontalConnection(positions[first.id], positions[second.id]); return <path key={partnership.id} className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""} ${edgeMuted(first.id, second.id) ? "connection-branch-muted" : ""}`} d={geometry.path} />; })}</g></svg><div className="tree-connection-labels" aria-label="Подписи семейных связей">{labels.map((label) => { const expanded = expandedLabelId === label.id; return <button key={label.id} type="button" className={`connection-label ${label.muted ? "connection-label-muted" : ""} ${expanded ? "expanded" : ""}`} style={{ left: label.left, top: label.top }} aria-expanded={expanded} title={expanded ? "Свернуть полное название связи" : label.full} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setExpandedLabelId((current) => current === label.id ? "" : label.id); }}>{expanded ? label.full : label.short}</button>; })}</div></>;
 }
 
@@ -807,8 +807,9 @@ function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewp
   const point = (position) => ({ x: padding + position.left * scale, y: padding + position.top * scale, width: position.width * scale, height: position.height * scale });
   const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships), [people, partnerships]);
   const index = renderIndex || fallbackIndex;
-  const parentLines = index.parentEdges.filter(({ parent, child }) => !hiddenIds.has(parent.id) && !hiddenIds.has(child.id)).map(({ parent, child }) => ({ parent: positions[parent.id], child: positions[child.id] })).filter((edge) => edge.parent && edge.child);
-  const partnerLines = index.partnershipEdges.filter(({ first, second }) => !hiddenIds.has(first.id) && !hiddenIds.has(second.id)).map(({ partnership, first, second }) => ({ partnership, first: positions[first.id], second: positions[second.id] })).filter((edge) => edge.first && edge.second);
+  const parentLines = useMemo(() => index.parentEdges.filter(({ parent, child }) => !hiddenIds.has(parent.id) && !hiddenIds.has(child.id)).map(({ parent, child }) => ({ parent: positions[parent.id], child: positions[child.id] })).filter((edge) => edge.parent && edge.child), [index, hiddenIds, positions]);
+  const partnerLines = useMemo(() => index.partnershipEdges.filter(({ first, second }) => !hiddenIds.has(first.id) && !hiddenIds.has(second.id)).map(({ partnership, first, second }) => ({ partnership, first: positions[first.id], second: positions[second.id] })).filter((edge) => edge.first && edge.second), [index, hiddenIds, positions]);
+  const miniMapPeople = useMemo(() => people.filter((person) => !hiddenIds.has(person.id)), [people, hiddenIds]);
   const viewportWidth = viewportSize.width ? viewportSize.width / zoom : 0;
   const viewportHeight = viewportSize.height ? viewportSize.height / zoom : 0;
   const visibleBoard = { x: Math.max(0, -pan.x / zoom), y: Math.max(0, -pan.y / zoom), width: Math.min(layout.width, viewportWidth), height: Math.min(layout.height, viewportHeight) };
@@ -818,7 +819,7 @@ function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewp
     const localY = ((event.clientY - rect.top) / rect.height) * mapHeight;
     onNavigate({ x: Math.max(0, Math.min(layout.width, (localX - padding) / scale)), y: Math.max(0, Math.min(layout.height, (localY - padding) / scale)) });
   };
-  return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{people.filter((person) => !hiddenIds.has(person.id)).map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
+  return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{miniMapPeople.map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
 }
 
 function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, showFormerSurnames, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected, viewMode = "full", branchDepth = "all", branchIds = new Set(), contextIds = new Set(), nearbyIds = new Set(), collapsedIds = new Set(), onToggleCollapse, onResetCollapsedBranches, onViewModeChange, onBranchDepthChange }) {
@@ -831,8 +832,9 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const renderIndex = useMemo(() => createRenderIndex(people, partnerships, peopleById), [people, partnerships, peopleById]);
-  const hiddenIds = useMemo(() => getCollapsedDescendantIds(people, partnerships, collapsedIds), [people, partnerships, collapsedIds]);
-  const collapsibleIds = useMemo(() => new Set(people.filter((person) => hasDescendants(people, person.id, partnerships)).map((person) => person.id)), [people, partnerships]);
+  const collapseIndex = useMemo(() => createCollapseIndex(people, partnerships), [people, partnerships]);
+  const hiddenIds = useMemo(() => getCollapsedDescendantIds(people, partnerships, collapsedIds, collapseIndex), [people, partnerships, collapsedIds, collapseIndex]);
+  const collapsibleIds = useMemo(() => getCollapsibleIds(people, partnerships, collapseIndex), [people, partnerships, collapseIndex]);
   const childNumberById = useMemo(() => {
     const childIdsByParent = new Map();
     const addChild = (parentId, childId) => {

@@ -28,10 +28,34 @@ export function createRenderIndex(people, partnerships, byId = new Map(people.ma
     const second = byId.get(partnership.personIds?.[1]);
     return first && second ? [{ partnership, first, second }] : [];
   });
-  return { byId, parentEdges, siblingEdges, partnershipEdges };
+  const parentEdgesByPerson = new Map();
+  const partnershipEdgesByPerson = new Map();
+  const indexEdge = (map, personId, edge) => {
+    if (!map.has(personId)) map.set(personId, []);
+    map.get(personId).push(edge);
+  };
+  parentEdges.forEach((edge) => {
+    indexEdge(parentEdgesByPerson, edge.parent.id, edge);
+    indexEdge(parentEdgesByPerson, edge.child.id, edge);
+  });
+  partnershipEdges.forEach((edge) => {
+    indexEdge(partnershipEdgesByPerson, edge.first.id, edge);
+    indexEdge(partnershipEdgesByPerson, edge.second.id, edge);
+  });
+  return { byId, parentEdges, siblingEdges, partnershipEdges, parentEdgesByPerson, partnershipEdgesByPerson };
 }
 
-export function visibleEdges(edges, visibleIds) {
+export function visibleEdges(edges, visibleIds, edgesByPerson = null) {
   if (!visibleIds) return edges;
+  if (edgesByPerson) {
+    const result = [];
+    const seen = new Set();
+    visibleIds.forEach((personId) => (edgesByPerson.get(personId) || []).forEach((edge) => {
+      if (seen.has(edge)) return;
+      seen.add(edge);
+      result.push(edge);
+    }));
+    return result;
+  }
   return edges.filter(({ parent, child, first, second }) => visibleIds.has(parent?.id || first?.id) || visibleIds.has(child?.id || second?.id));
 }
