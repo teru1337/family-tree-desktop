@@ -1,5 +1,25 @@
 const BIOLOGICAL = "biological";
 
+function birthOrderKey(person) {
+  const value = String(person?.birthDate?.value || person?.birthDate?.text || person?.year || "").trim();
+  const dayMonthYear = value.match(/(^|\D)(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})(?:\D|$)/);
+  if (dayMonthYear) return Number(`${dayMonthYear[4]}${dayMonthYear[3].padStart(2, "0")}${dayMonthYear[2].padStart(2, "0")}`);
+  const yearMonthDay = value.match(/(^|\D)(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\D|$)/);
+  if (yearMonthDay) return Number(`${yearMonthDay[2]}${yearMonthDay[3].padStart(2, "0")}${yearMonthDay[4].padStart(2, "0")}`);
+  const year = value.match(/(?:^|\D)((?:1[5-9]\d{2})|(?:20\d{2}))(?:\D|$)/);
+  return year ? Number(year[1]) * 10000 : Number.POSITIVE_INFINITY;
+}
+
+function compareOlderPeople(first, second) {
+  const firstBirth = birthOrderKey(first);
+  const secondBirth = birthOrderKey(second);
+  if (firstBirth !== secondBirth) return firstBirth - secondBirth;
+  const firstManual = Number.isInteger(Number(first?.siblingOrder)) && Number(first.siblingOrder) > 0 ? Number(first.siblingOrder) : Number.POSITIVE_INFINITY;
+  const secondManual = Number.isInteger(Number(second?.siblingOrder)) && Number(second.siblingOrder) > 0 ? Number(second.siblingOrder) : Number.POSITIVE_INFINITY;
+  if (firstManual !== secondManual) return firstManual - secondManual;
+  return `${personLabel(first)}\u0000${first?.id || ""}`.localeCompare(`${personLabel(second)}\u0000${second?.id || ""}`, "ru");
+}
+
 function genderTerm(person, male, female, neutral = `${male}/${female}`) {
   if (person?.gender === "male") return male;
   if (person?.gender === "female") return female;
@@ -115,6 +135,22 @@ function findPath(graph, sourceId, targetId) {
     }
   }
   return null;
+}
+
+function pathGenerationDelta(path, edges) {
+  return edges.reduce((total, edge, index) => {
+    if (edge.kind !== "parent") return total;
+    const from = path[index];
+    return total + (edge.parentId === from.id ? 1 : -1);
+  }, 0);
+}
+
+export function orientRelationshipPath(source, target, path, edges) {
+  if (!path?.length || path.length < 2) return { path: path || [], edges: edges || [], reversed: false };
+  const delta = pathGenerationDelta(path, edges);
+  const reverse = delta < 0 || (delta === 0 && compareOlderPeople(target, source) < 0);
+  if (!reverse) return { path, edges, reversed: false };
+  return { path: [...path].reverse(), edges: [...edges].reverse(), reversed: true };
 }
 
 function findParentPath(graph, sourceId, targetId, biologicalOnly = false) {
@@ -289,11 +325,13 @@ export function calculateRelationship(people, partnerships, sourceId, targetId) 
   const { byId, graph } = createRelationshipGraph(people, partnerships);
   const source = byId.get(sourceId);
   const target = byId.get(targetId);
-  if (!source || !target) return { status: "missing", source, target, path: [], edges: [], steps: [], label: "Выберите двух людей" };
-  if (source.id === target.id) return { status: "same", source, target, path: [source], edges: [], steps: [], label: "Это один и тот же человек" };
+  if (!source || !target) return { status: "missing", source, target, path: [], edges: [], displayPath: [], displayEdges: [], steps: [], displaySteps: [], label: "Выберите двух людей" };
+  if (source.id === target.id) return { status: "same", source, target, path: [source], edges: [], displayPath: [source], displayEdges: [], steps: [], displaySteps: [], label: "Это один и тот же человек" };
   const found = findPath(graph, source.id, target.id);
-  if (!found) return { status: "unrelated", source, target, path: [], edges: [], steps: [], label: "Связь между людьми не найдена" };
+  if (!found) return { status: "unrelated", source, target, path: [], edges: [], displayPath: [], displayEdges: [], steps: [], displaySteps: [], label: "Связь между людьми не найдена" };
   const path = found.ids.map((id) => byId.get(id)).filter(Boolean);
   const steps = found.edges.map((edge, index) => ({ from: path[index], to: path[index + 1], edge, label: formatRelationshipStep(path[index], path[index + 1], edge) }));
-  return { status: "found", source, target, path, edges: found.edges, steps, label: describeRelationship(source, target, found, graph, byId) };
+  const oriented = orientRelationshipPath(source, target, path, found.edges);
+  const displaySteps = oriented.edges.map((edge, index) => ({ from: oriented.path[index], to: oriented.path[index + 1], edge, label: formatRelationshipStep(oriented.path[index], oriented.path[index + 1], edge) }));
+  return { status: "found", source, target, path, edges: found.edges, steps, displayPath: oriented.path, displayEdges: oriented.edges, displaySteps, label: describeRelationship(source, target, found, graph, byId) };
 }

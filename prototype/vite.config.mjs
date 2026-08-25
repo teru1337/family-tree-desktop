@@ -13,6 +13,7 @@ export default defineConfig({
           timeline: ["./src/timeline.js"],
           "sibling-order": ["./src/sibling-order.js"],
           "family-view": ["./src/family-view.js"],
+          "relationship-calculator": ["./src/relationship-calculator.js"],
         },
       },
     },
