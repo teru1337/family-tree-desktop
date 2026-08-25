@@ -3,6 +3,7 @@ const { autoUpdater } = require("electron-updater");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const { atomicWriteTextFile, isRecoverableFileError } = require("./file-io.cjs");
 
 const APP_ID = "ru.teru1337.familytree";
 const RELEASES_URL = "https://github.com/teru1337/family-tree-desktop/releases";
@@ -266,6 +267,25 @@ if (!hasSingleInstance) {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
   ipcMain.handle("family-tree-version", () => app.getVersion());
+  ipcMain.handle("family-tree-open-project-file", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Открыть семейное древо",
+      defaultPath: app.getPath("documents"),
+      properties: ["openFile"],
+      filters: [
+        { name: "Файл семейного древа", extensions: ["familytree", "json"] },
+        { name: "Все файлы", extensions: ["*"] },
+      ],
+    });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    const filePath = result.filePaths[0];
+    return {
+      canceled: false,
+      filePath,
+      fileName: path.basename(filePath),
+      text: await fs.promises.readFile(filePath, "utf8"),
+    };
+  });
   ipcMain.handle("family-tree-save-project-file", async (_event, request = {}) => {
     const isArchive = request.kind === "archive";
     const suggestedName = path.basename(String(request.suggestedName || "семейное-древо.familytree"));
@@ -283,8 +303,15 @@ if (!hasSingleInstance) {
       if (result.canceled || !result.filePath) return { canceled: true };
       filePath = result.filePath;
     }
-    await fs.promises.writeFile(filePath, JSON.stringify(request.payload || {}, null, 2), "utf8");
-    return { canceled: false, filePath };
+    try {
+      const result = await atomicWriteTextFile(filePath, JSON.stringify(request.payload || {}, null, 2));
+      return { canceled: false, ...result };
+    } catch (error) {
+      if (request.filePath && isRecoverableFileError(error)) {
+        return { canceled: false, needsSaveAs: true, errorCode: error.code || "FILE_ACCESS", errorMessage: error.message || "Недоступно" };
+      }
+      throw error;
+    }
   });
   ipcMain.handle("family-tree-update-check", () => checkForUpdates());
   ipcMain.handle("family-tree-update-download", () => downloadUpdate());

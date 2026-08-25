@@ -36,7 +36,7 @@ test("save and recovery UI explains the current file and requires verification b
 test("Windows build exposes a native save dialog and writes the selected file", () => {
   assert.match(preloadSource, /family-tree-save-project-file/);
   assert.match(mainSource, /dialog\.showSaveDialog/);
-  assert.match(mainSource, /fs\.promises\.writeFile/);
+  assert.match(mainSource, /atomicWriteTextFile/);
 });
 
 console.log("Stage 35 save and recovery clarity ok: path, native save and verified restore");

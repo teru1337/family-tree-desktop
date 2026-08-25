@@ -1412,6 +1412,7 @@ export function App() {
   const historyRef = useRef(null);
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false });
   const fileInputRef = useRef(null);
+  const saveInProgressRef = useRef(false);
   const searchInputRef = useRef(null);
   const inspectorResizeRef = useRef(null);
   const selectedPerson = people.find((person) => person.id === selectedId) || people[0];
@@ -1680,6 +1681,11 @@ export function App() {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "f") {
         event.preventDefault();
         searchInputRef.current?.focus();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
+        event.preventDefault();
+        void saveProject();
         return;
       }
       const tagName = event.target?.tagName?.toLowerCase();
@@ -2002,13 +2008,19 @@ export function App() {
       downloadProjectFile(payload, suggestedName);
       return { canceled: false, payload, projectMeta };
     }
-    const result = await saveWithDesktop(payload, suggestedName, projectMeta.filePath || "");
+    let result = await saveWithDesktop(payload, suggestedName, projectMeta.filePath || "");
+    if (result?.needsSaveAs && projectMeta.filePath) {
+      setToast("Прежнее место сохранения недоступно. Выберите новое место для файла.");
+      result = await saveWithDesktop(payload, suggestedName, "");
+    }
     if (result?.canceled) return { canceled: true };
     const filePath = result?.filePath || projectMeta.filePath || "";
     const nextProjectMeta = { ...projectMeta, fileName: fileNameFromPath(filePath) || suggestedName, filePath };
     return { canceled: false, payload: createProjectPayload(people, nextProjectMeta, partnerships), projectMeta: nextProjectMeta };
   };
   const saveProject = async () => {
+    if (saveInProgressRef.current) return;
+    saveInProgressRef.current = true;
     try {
       const saved = await saveProjectToFile();
       if (saved.canceled) {
@@ -2021,6 +2033,8 @@ export function App() {
       setToast(warningCount ? `Проект сохранён; найдено замечаний: ${warningCount}` : `Проект сохранён: ${saved.projectMeta.fileName || "семейное-древо.familytree"}`);
     } catch (error) {
       setToast(explainUserError(error, { action: "Не удалось сохранить проект", next: "проверьте свободное место и доступ к папке загрузок" }));
+    } finally {
+      saveInProgressRef.current = false;
     }
   };
   const saveForContinuation = async () => {
@@ -2109,10 +2123,52 @@ export function App() {
       setToast(explainUserError(error, { action: "Не удалось восстановить архив", next: "выберите другой архив и повторите восстановление" }));
     }
   };
-  const openProject = (skipPrompt = false) => {
+  const loadProjectContents = ({ fileName, filePath = "", text }) => {
+    if (dirty) {
+      const backup = addBackup(buildPayload(), "before-open");
+      setBackups(readBackups());
+      setLastBackupAt(backup?.createdAt || null);
+    }
+    const payload = normalizeProject(JSON.parse(text));
+    const loadedPayload = { ...payload, project: { ...payload.project, fileName: fileName || fileNameFromPath(filePath) || "семейное-древо.familytree" } };
+    writeWorkingCopy(loadedPayload);
+    const loadedSettings = { ...defaultProjectSettings, ...(loadedPayload.project.settings || {}) };
+    const nextProjectMeta = { ...loadedPayload.project, settings: loadedSettings, filePath: String(filePath || "") };
+    resetHistory(loadedPayload.people, loadedPayload.partnerships || [], nextProjectMeta);
+    setPeople(payload.people);
+    setPartnerships(loadedPayload.partnerships || []);
+    setProjectMeta(nextProjectMeta);
+    setCollapsedBranches(new Set());
+    setTreeStyle(loadedSettings.treeStyle || "classic");
+    setShowPhotos(loadedSettings.showPhotos !== false);
+    setShowFormerSurnames(loadedSettings.showFormerSurnames !== false);
+    setLargeText(loadedSettings.largeText === true);
+    setCardFields(sanitizeCardFields(loadedSettings.cardFields));
+    setAutoSaveEnabled(loadedSettings.autoSave !== false);
+    const loadedSelectedId = loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "";
+    setSelectedId(loadedSelectedId);
+    resetPersonNavigation(loadedSelectedId);
+    setEditing(false);
+    setDraft(null);
+    setLastSavedAt(loadedPayload.manifest.updatedAt);
+    setDirty(false);
+    setMainMenuOpen(false);
+    setToast(loadedPayload.validationWarnings?.length ? `Проект открыт; найдено замечаний: ${loadedPayload.validationWarnings.length}` : `Открыт проект: ${loadedPayload.project.fileName}`);
+  };
+  const openProject = async (skipPrompt = false) => {
     if (!skipPrompt && dirty) {
       setMainMenuOpen(false);
       setPendingUnsavedAction({ type: "open" });
+      return;
+    }
+    const openWithDesktop = window.familyTreeDesktop?.openProjectFile;
+    if (openWithDesktop) {
+      try {
+        const result = await openWithDesktop();
+        if (!result?.canceled) loadProjectContents(result);
+      } catch (error) {
+        setToast(explainUserError(error, { action: "Не удалось открыть файл проекта", next: "выберите корректный файл .familytree или резервную копию" }));
+      }
       return;
     }
     fileInputRef.current?.click();
@@ -2121,37 +2177,7 @@ export function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      if (dirty) {
-        const backup = addBackup(buildPayload(), "before-open");
-        setBackups(readBackups());
-        setLastBackupAt(backup?.createdAt || null);
-      }
-      const payload = normalizeProject(JSON.parse(await file.text()));
-      const loadedFilePath = typeof file.path === "string" ? file.path : "";
-      const loadedPayload = { ...payload, project: { ...payload.project, fileName: file.name } };
-      writeWorkingCopy(loadedPayload);
-      const loadedSettings = { ...defaultProjectSettings, ...(loadedPayload.project.settings || {}) };
-      const nextProjectMeta = { ...loadedPayload.project, settings: loadedSettings, filePath: loadedFilePath };
-      resetHistory(loadedPayload.people, loadedPayload.partnerships || [], nextProjectMeta);
-      setPeople(payload.people);
-      setPartnerships(loadedPayload.partnerships || []);
-      setProjectMeta(nextProjectMeta);
-      setCollapsedBranches(new Set());
-      setTreeStyle(loadedSettings.treeStyle || "classic");
-      setShowPhotos(loadedSettings.showPhotos !== false);
-      setShowFormerSurnames(loadedSettings.showFormerSurnames !== false);
-      setLargeText(loadedSettings.largeText === true);
-      setCardFields(sanitizeCardFields(loadedSettings.cardFields));
-      setAutoSaveEnabled(loadedSettings.autoSave !== false);
-      const loadedSelectedId = loadedPayload.people.find((person) => person.id === "ivan")?.id || loadedPayload.people[0]?.id || "";
-      setSelectedId(loadedSelectedId);
-      resetPersonNavigation(loadedSelectedId);
-      setEditing(false);
-      setDraft(null);
-      setLastSavedAt(loadedPayload.manifest.updatedAt);
-      setDirty(false);
-      setMainMenuOpen(false);
-      setToast(loadedPayload.validationWarnings?.length ? `Проект открыт; найдено замечаний: ${loadedPayload.validationWarnings.length}` : `Открыт проект: ${file.name}`);
+      loadProjectContents({ fileName: file.name, filePath: typeof file.path === "string" ? file.path : "", text: await file.text() });
     } catch (error) {
       setToast(explainUserError(error, { action: "Не удалось открыть файл проекта", next: "выберите корректный файл .familytree или резервную копию" }));
     } finally {
