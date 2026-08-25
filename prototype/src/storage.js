@@ -124,9 +124,9 @@ function stripPersonRelations(person) {
 }
 
 function stripPersonForStorage(person) {
-  const { image, year, datePrecision, birthDateFrom, birthDateTo, ...profile } = stripPersonRelations(person);
-  const normalized = normalizePersonDate(normalizePersonMetadata({ ...profile, year, datePrecision, birthDateFrom, birthDateTo }));
-  const { year: compatibilityYear, datePrecision: compatibilityPrecision, birthDateFrom: compatibilityFrom, birthDateTo: compatibilityTo, ...storedProfile } = normalized;
+  const { image, year, datePrecision, birthDateFrom, birthDateTo, deathYear, deathDatePrecision, deathDateFrom, deathDateTo, ...profile } = stripPersonRelations(person);
+  const normalized = normalizePersonDate(normalizePersonMetadata({ ...profile, year, datePrecision, birthDateFrom, birthDateTo, deathYear, deathDatePrecision, deathDateFrom, deathDateTo }));
+  const { year: compatibilityYear, datePrecision: compatibilityPrecision, birthDateFrom: compatibilityFrom, birthDateTo: compatibilityTo, deathYear: compatibilityDeathYear, deathDatePrecision: compatibilityDeathPrecision, deathDateFrom: compatibilityDeathFrom, deathDateTo: compatibilityDeathTo, ...storedProfile } = normalized;
   return { ...storedProfile, birthDate: normalized.birthDate };
 }
 
@@ -457,6 +457,10 @@ export function validateProject(raw) {
     const dateReport = validateDateRecord(person?.birthDate, person?.year, person?.datePrecision);
     if (!dateReport.valid && (person?.birthDate !== undefined || person?.year || person?.datePrecision)) {
       warnings.push(`Дата рождения записи ${personId} заполнена неправильно: ${dateReport.error}`);
+    }
+    const deathReport = validateDateRecord(person?.deathDate, person?.deathYear, person?.deathDatePrecision);
+    if (!deathReport.valid && (person?.deathDate !== undefined || person?.deathYear || person?.deathDatePrecision)) {
+      warnings.push(`Дата смерти записи ${personId} заполнена неправильно: ${deathReport.error}`);
     }
   });
 

@@ -1,4 +1,4 @@
-import { normalizePersonDate, parseDatePart } from "./dates.js";
+import { dateRecordBounds, normalizePersonDate, parseDatePart } from "./dates.js";
 
 const MIN_PARENT_AGE = 12;
 const MIN_PARTNERSHIP_AGE = 12;
@@ -36,6 +36,11 @@ function birthYearBounds(person) {
   }
   const year = yearFromValue(birthDate.value || birthDate.text || normalized.year);
   return year === null ? null : { min: year, max: year };
+}
+
+function deathDateBounds(person) {
+  const normalized = normalizePersonDate(person || {});
+  return normalized.deathDate ? dateRecordBounds(normalized.deathDate) : null;
 }
 
 function sameBirthYear(left, right) {
@@ -109,6 +114,18 @@ function inspectTimelineEvents(people, warnings) {
       }
       if (normalizedKey(event?.title)) seenEvents.add(eventKey);
     });
+  });
+}
+
+function inspectDeathDates(people, warnings) {
+  people.forEach((person) => {
+    const normalized = normalizePersonDate(person || {});
+    const birth = dateRecordBounds(normalized.birthDate);
+    const death = deathDateBounds(normalized);
+    if (!death) return;
+    if (birth && death.to < birth.from) {
+      addWarning(warnings, `Невозможная дата: смерть «${personLabel(person)}» указана раньше рождения. Проверьте даты.`);
+    }
   });
 }
 
@@ -260,6 +277,7 @@ export function inspectFamilyData(peopleInput, relationsInput = []) {
   const errors = [];
   inspectDuplicates(people, warnings);
   inspectTimelineEvents(people, warnings);
+  inspectDeathDates(people, warnings);
   inspectRelationConsistency(peopleById, relations, warnings, errors);
   inspectParentRelations(peopleById, relations, warnings, errors);
   inspectPartnerships(peopleById, relations, warnings);

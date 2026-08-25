@@ -7,6 +7,7 @@ export const MAX_EVENT_SOURCE = 300;
 
 export const TIMELINE_EVENT_TYPES = Object.freeze([
   { value: "birth", label: "Рождение" },
+  { value: "death", label: "Смерть" },
   { value: "residence", label: "Место жительства" },
   { value: "education", label: "Образование" },
   { value: "work", label: "Работа" },

@@ -136,6 +136,56 @@ export function formatDateRecord(record, fallback = "") {
   return normalized.text || formatDatePart(normalized.value);
 }
 
+function dateRangeForPart(value) {
+  const parsed = parseDatePart(value);
+  if (!parsed.valid) return null;
+  if (parsed.kind === "year") return { from: `${parsed.value}-01-01`, to: `${parsed.value}-12-31` };
+  return { from: parsed.value, to: parsed.value };
+}
+
+export function dateRecordBounds(record, fallback = "") {
+  const normalized = normalizeDateRecord(record, fallback);
+  if (normalized.precision === "range") {
+    const from = dateRangeForPart(normalized.from);
+    const to = dateRangeForPart(normalized.to);
+    if (!from || !to) return null;
+    return { from: from.from, to: to.to, precision: normalized.precision };
+  }
+  const range = dateRangeForPart(normalized.value || normalized.text);
+  return range ? { ...range, precision: normalized.precision } : null;
+}
+
+function completedYears(from, to) {
+  const start = String(from || "").split("-").map(Number);
+  const end = String(to || "").split("-").map(Number);
+  if (start.length !== 3 || end.length !== 3 || start.some(Number.isNaN) || end.some(Number.isNaN)) return null;
+  let age = end[0] - start[0];
+  if (end[1] < start[1] || (end[1] === start[1] && end[2] < start[2])) age -= 1;
+  return age;
+}
+
+export function calculateAgeAtDeath(birthRecord, deathRecord) {
+  const birth = dateRecordBounds(birthRecord);
+  const death = dateRecordBounds(deathRecord);
+  if (!birth || !death) return null;
+  const minimum = completedYears(birth.to, death.from);
+  const maximum = completedYears(birth.from, death.to);
+  if (minimum === null || maximum === null || maximum < 0) return null;
+  const approximate = birth.precision !== "exact" || death.precision !== "exact" || minimum !== maximum;
+  return { minimum, maximum, approximate };
+}
+
+export function formatAgeAtDeath(birthRecord, deathRecord) {
+  const age = calculateAgeAtDeath(birthRecord, deathRecord);
+  if (!age) return "";
+  const value = age.minimum === age.maximum ? String(age.minimum) : `${age.minimum}–${age.maximum}`;
+  return `${age.approximate ? "около " : ""}${value} лет`;
+}
+
+function hasDeathDateInput(person) {
+  return person?.deathDate !== undefined || Boolean(person?.deathYear || person?.deathDateFrom || person?.deathDateTo);
+}
+
 export function normalizePersonDate(person) {
   const legacyPrecision = inferDatePrecision(person?.year, person?.datePrecision);
   const record = normalizeDateRecord({
@@ -144,12 +194,27 @@ export function normalizePersonDate(person) {
     to: person?.birthDate?.to || person?.birthDateTo || "",
   }, person?.year, legacyPrecision);
   const display = formatDateRecord(record, person?.year);
-  return {
+  const normalized = {
     ...person,
     birthDate: record,
     year: display,
     datePrecision: record.precision,
     birthDateFrom: record.precision === "range" ? formatDatePart(record.from) : "",
     birthDateTo: record.precision === "range" ? formatDatePart(record.to) : "",
+  };
+  if (!hasDeathDateInput(person)) return normalized;
+  const deathLegacyPrecision = inferDatePrecision(person?.deathYear, person?.deathDatePrecision);
+  const deathRecord = normalizeDateRecord({
+    ...(person?.deathDate && typeof person.deathDate === "object" ? person.deathDate : {}),
+    from: person?.deathDate?.from || person?.deathDateFrom || "",
+    to: person?.deathDate?.to || person?.deathDateTo || "",
+  }, person?.deathYear, deathLegacyPrecision);
+  return {
+    ...normalized,
+    deathDate: deathRecord,
+    deathYear: formatDateRecord(deathRecord, person?.deathYear),
+    deathDatePrecision: deathRecord.precision,
+    deathDateFrom: deathRecord.precision === "range" ? formatDatePart(deathRecord.from) : "",
+    deathDateTo: deathRecord.precision === "range" ? formatDatePart(deathRecord.to) : "",
   };
 }

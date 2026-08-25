@@ -48,7 +48,7 @@ import {
   verifyBackup,
   writeWorkingCopy,
 } from "./storage.js";
-import { formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate } from "./dates.js";
+import { formatAgeAtDeath, formatDateRecord, inferDatePrecision, normalizeDateRecord, normalizePersonDate } from "./dates.js";
 import { createHistory, createSnapshot, getHistoryStatus, recordHistory, redoHistory, snapshotsEqual, undoHistory } from "./history.js";
 import { DEFAULT_SEARCH_FILTERS, filterPeople } from "./search.js";
 import { createRenderIndex, visibleEdges } from "./render-index.js";
@@ -77,7 +77,7 @@ function BrandMark({ className = "" }) {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, deathYear: "", deathDatePrecision: "", deathDateFrom: "", deathDateTo: "", place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
@@ -100,15 +100,34 @@ function makeId() {
   return `person-${Date.now()}`;
 }
 
-function getDraftDateRecord(draft) {
-  const precision = draft?.datePrecision || inferDatePrecision(draft?.year);
+function getDraftDateRecord(draft, kind = "birth") {
+  const isDeath = kind === "death";
+  const value = isDeath ? draft?.deathYear : draft?.year;
+  const precision = (isDeath ? draft?.deathDatePrecision : draft?.datePrecision) || inferDatePrecision(value);
   return {
     precision,
-    text: precision === "range" ? "" : String(draft?.year || "").trim(),
-    value: precision === "range" ? "" : String(draft?.year || "").trim(),
-    from: String(draft?.birthDateFrom || "").trim(),
-    to: String(draft?.birthDateTo || "").trim(),
+    text: precision === "range" ? "" : String(value || "").trim(),
+    value: precision === "range" ? "" : String(value || "").trim(),
+    from: String(draft?.[isDeath ? "deathDateFrom" : "birthDateFrom"] || "").trim(),
+    to: String(draft?.[isDeath ? "deathDateTo" : "birthDateTo"] || "").trim(),
   };
+}
+
+function deathFieldsFromDraft(draft) {
+  const record = normalizeDateRecord(getDraftDateRecord(draft, "death"));
+  const hasDate = Boolean(record.text || record.value || record.from || record.to);
+  return hasDate ? {
+    deathDate: record,
+    deathDatePrecision: record.precision,
+    deathYear: formatDateRecord(record),
+    deathDateFrom: record.precision === "range" ? record.from : "",
+    deathDateTo: record.precision === "range" ? record.to : "",
+  } : {};
+}
+
+function withoutDeathDateFields(person) {
+  const { deathDate, deathYear, deathDatePrecision, deathDateFrom, deathDateTo, ...rest } = person || {};
+  return rest;
 }
 
 function validatePersonDraft(draft, { isNew = false, relationshipMode = "", connectionTargetId = "", relationshipSource = "" } = {}) {
@@ -235,6 +254,7 @@ function TreeNode({ person, position, selected, branchMuted, onSelect, showPhoto
   return (
     <button className={`tree-node ${genderClass} ${branchMuted ? "tree-node-branch-muted" : ""} ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${cardName}${childNumber ? `, ребёнок номер ${childNumber}` : ""}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
       {childNumber && <span className="tree-node-child-number" aria-label={`Ребёнок номер ${childNumber}`}>№{childNumber}</span>}
+      {hasDeathInformation(person) && <span className="tree-node-death-marker" aria-label="Дата смерти указана" title="Дата смерти указана">†</span>}
       <PersonAvatar person={person} showPhoto={showPhotos} />
       <span className="tree-node-copy">
         {cardName.split("\n").map((line) => <span key={line} className="tree-node-name">{line}</span>)}
@@ -287,6 +307,19 @@ function SectionEditorFooter({ onCancel, onSave }) {
   return <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button><button type="button" className="button button-primary save-button" onClick={onSave}><FloppyDisk size={18} weight="bold" /> Сохранить</button></div>;
 }
 
+function DeathFields({ draft, update, onClear, errors = {} }) {
+  const precision = draft.deathDatePrecision || inferDatePrecision(draft.deathYear);
+  const clear = () => onClear?.() || update("deathDatePrecision", "unknown");
+  return <>
+    <div className={`field field-full ${errors.deathYear ? "has-error" : ""}`}><span>Дата смерти <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.deathDateFrom || ""} onChange={(event) => update("deathDateFrom", event.target.value)} placeholder="Начало, например 2020" aria-invalid={Boolean(errors.deathYear)} /><span>—</span><input value={draft.deathDateTo || ""} onChange={(event) => update("deathDateTo", event.target.value)} placeholder="Конец, например 2021" aria-invalid={Boolean(errors.deathYear)} /></div> : <input value={draft.deathYear || ""} onChange={(event) => update("deathYear", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.2020" : precision === "approximate" ? "Например, около 2020" : "Например, 2020"} aria-invalid={Boolean(errors.deathYear)} />}{errors.deathYear && <small className="field-error">{errors.deathYear}</small>}</div>
+    <div className="field field-full"><span>Точность даты смерти</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("deathDatePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("deathDatePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("deathDatePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("deathDatePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={clear}>Неизвестно</button></div><small className="field-hint">Дата смерти не может быть раньше даты рождения.</small></div>
+    <label className={`field field-full ${errors.deathPlace ? "has-error" : ""}`}><span>Место смерти <em>необязательно</em></span><div className="input-with-icon"><MapPin size={17} /><input value={draft.deathPlace || ""} onChange={(event) => update("deathPlace", event.target.value)} aria-invalid={Boolean(errors.deathPlace)} /></div>{errors.deathPlace && <small className="field-error">{errors.deathPlace}</small>}</label>
+    <label className={`field field-full ${errors.deathCause ? "has-error" : ""}`}><span>Причина смерти <em>необязательно</em></span><input value={draft.deathCause || ""} onChange={(event) => update("deathCause", event.target.value)} aria-invalid={Boolean(errors.deathCause)} />{errors.deathCause && <small className="field-error">{errors.deathCause}</small>}</label>
+    <label className={`field ${errors.deathSource ? "has-error" : ""}`}><span>Источник смерти <em>необязательно</em></span><input value={draft.deathSource || ""} onChange={(event) => update("deathSource", event.target.value)} aria-invalid={Boolean(errors.deathSource)} />{errors.deathSource && <small className="field-error">{errors.deathSource}</small>}</label>
+    <label className={`field field-full ${errors.deathComment ? "has-error" : ""}`}><span>Комментарий о смерти <em>необязательно</em></span><textarea value={draft.deathComment || ""} onChange={(event) => update("deathComment", event.target.value)} rows="3" aria-invalid={Boolean(errors.deathComment)} />{errors.deathComment && <small className="field-error">{errors.deathComment}</small>}</label>
+  </>;
+}
+
 function BasicPersonSectionEditor({ person, onSave, onCancel }) {
   const [draft, setDraft] = useState(() => normalizePersonDate({ ...person }));
   const [errors, setErrors] = useState({});
@@ -304,6 +337,7 @@ function BasicPersonSectionEditor({ person, onSave, onCancel }) {
     <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
     <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year || ""} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
     <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => setDraft((current) => ({ ...current, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }))}>Неизвестно</button></div></div>
+    <DeathFields draft={draft} update={update} onClear={() => setDraft((current) => ({ ...current, deathDatePrecision: "unknown", deathYear: "", deathDateFrom: "", deathDateTo: "" }))} errors={errors} />
     <label className={`field field-full ${errors.place ? "has-error" : ""}`}><span>Место рождения <em>необязательно</em></span><div className="input-with-icon"><MapPin size={17} /><input value={draft.place || ""} onChange={(event) => update("place", event.target.value)} aria-invalid={Boolean(errors.place)} /></div>{errors.place && <small className="field-error">{errors.place}</small>}</label>
     <label className={`field field-full ${errors.occupation ? "has-error" : ""}`}><span>Профессия <em>необязательно</em></span><div className="input-with-icon"><Briefcase size={17} /><input value={draft.occupation || ""} onChange={(event) => update("occupation", event.target.value)} aria-invalid={Boolean(errors.occupation)} /></div>{errors.occupation && <small className="field-error">{errors.occupation}</small>}</label>
     <label className={`field field-full ${errors.biography ? "has-error" : ""}`}><span>Краткая биография <em>необязательно</em></span><textarea value={draft.biography || ""} onChange={(event) => update("biography", event.target.value)} rows="5" aria-invalid={Boolean(errors.biography)} />{errors.biography && <small className="field-error">{errors.biography}</small>}</label>
@@ -347,6 +381,29 @@ function partnershipDescription(partnership) {
 const factSourceLabel = Object.fromEntries(FACT_SOURCE_OPTIONS.map((item) => [item.value, item.label]));
 const timelinePrecisionLabel = { exact: "точная дата", year: "только год", approximate: "примерная дата", range: "диапазон", unknown: "дата не уточнена" };
 
+function deathDateText(person) {
+  return person?.deathYear || formatDateRecord(person?.deathDate) || "";
+}
+
+function hasDeathInformation(person) {
+  return Boolean(deathDateText(person) || person?.deathPlace || person?.deathCause || person?.deathSource || person?.deathComment);
+}
+
+function generatedDeathEvent(person) {
+  if (!hasDeathInformation(person)) return null;
+  const age = formatAgeAtDeath(person?.birthDate, person?.deathDate);
+  return {
+    id: `death-${person.id}`,
+    type: "death",
+    title: "Смерть",
+    date: deathDateText(person),
+    datePrecision: person?.deathDatePrecision || person?.deathDate?.precision || "unknown",
+    place: person?.deathPlace || "",
+    description: [person?.deathCause, age ? `Возраст: ${age}` : "", person?.deathComment].filter(Boolean).join(" · "),
+    source: person?.deathSource || "",
+  };
+}
+
 function relationSourceText(source) {
   return source ? `Источник: ${source}` : "";
 }
@@ -357,7 +414,9 @@ function FactSourcesSection({ person, onEdit }) {
 }
 
 function TimelineSection({ person, onEdit }) {
-  const events = sortTimelineEvents(person?.timelineEvents);
+  const deathEvent = generatedDeathEvent(person);
+  const hasStoredDeathEvent = (Array.isArray(person?.timelineEvents) ? person.timelineEvents : []).some((event) => event?.type === "death");
+  const events = sortTimelineEvents([...(Array.isArray(person?.timelineEvents) ? person.timelineEvents : []), ...(deathEvent && !hasStoredDeathEvent ? [deathEvent] : [])]);
   return <section className="detail-section timeline-section"><div className="section-title-row"><h3>Временная шкала</h3><SectionEditButton label="Временная шкала" onClick={onEdit} /></div>{events.length ? <ol className="timeline-list">{events.map((event) => <li className="timeline-item" key={event.id}><div className="timeline-marker" /><div className="timeline-event-copy"><div className="timeline-event-heading"><strong>{event.title}</strong><span>{event.date || "Дата не указана"}</span></div><small>{timelineEventLabel(event)}{event.date && event.datePrecision !== "unknown" ? ` · ${timelinePrecisionLabel[event.datePrecision] || ""}` : ""}{event.place ? ` · ${event.place}` : ""}</small>{event.description && <p>{event.description}</p>}{event.source && <em>Источник: {event.source}</em>}</div></li>)}</ol> : <p className="empty-relation">События ещё не добавлены</p>}</section>;
 }
 
@@ -403,8 +462,8 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   const relationIds = [...parents, ...partners, ...children, ...siblings].map((item) => item.relationshipId).filter(Boolean);
   return (
     <div className="detail-content">
-      <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div></div><div className="profile-actions"><div className="person-navigation-actions"><button type="button" className="button button-secondary person-nav-button" onClick={onPreviousPerson} disabled={!canGoPrevious}><CaretLeft size={17} /> Предыдущий</button><button type="button" className="button button-secondary person-nav-button" onClick={onNextPerson} disabled={!canGoNext}>Следующий <CaretRight size={17} /></button></div><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
-      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><SectionEditButton label="Основная информация" onClick={() => setEditingSection("basic")} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Текущая фамилия</dt><dd>{person.nameParts?.familyName || "—"}</dd></div><div><dt>Прежние фамилии</dt><dd>{formerSurnames(person).join(", ") || "—"}</dd></div><div><dt>Происхождение ФИО</dt><dd>{person.nameOrigin?.status === "suggested" ? "Предложено по родителям" : person.nameOrigin?.status === "inferred" ? "Выведено из старой записи" : "Введено пользователем"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
+      <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}{deathDateText(person) ? ` · † ${deathDateText(person)}` : ""}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div>{person.deathPlace && <div className="profile-place profile-death-place"><MapPin size={17} /> {person.deathPlace}</div>}</div><div className="profile-actions"><div className="person-navigation-actions"><button type="button" className="button button-secondary person-nav-button" onClick={onPreviousPerson} disabled={!canGoPrevious}><CaretLeft size={17} /> Предыдущий</button><button type="button" className="button button-secondary person-nav-button" onClick={onNextPerson} disabled={!canGoNext}>Следующий <CaretRight size={17} /></button></div><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
+      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><SectionEditButton label="Основная информация" onClick={() => setEditingSection("basic")} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Дата смерти</dt><dd>{deathDateText(person) || "—"}</dd></div><div><dt>Место смерти</dt><dd>{person.deathPlace || "—"}</dd></div><div><dt>Причина смерти</dt><dd>{person.deathCause || "—"}</dd></div>{person.deathDate && <div><dt>Возраст на момент смерти</dt><dd>{formatAgeAtDeath(person.birthDate, person.deathDate) || "—"}</dd></div>}<div><dt>Источник смерти</dt><dd>{person.deathSource || "—"}</dd></div><div><dt>Комментарий о смерти</dt><dd>{person.deathComment || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Текущая фамилия</dt><dd>{person.nameParts?.familyName || "—"}</dd></div><div><dt>Прежние фамилии</dt><dd>{formerSurnames(person).join(", ") || "—"}</dd></div><div><dt>Происхождение ФИО</dt><dd>{person.nameOrigin?.status === "suggested" ? "Предложено по родителям" : person.nameOrigin?.status === "inferred" ? "Выведено из старой записи" : "Введено пользователем"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
       <FactSourcesSection person={person} onEdit={() => setEditingSection("sources")} />
       <TimelineSection person={person} onEdit={() => setEditingSection("timeline")} />
       <RelationSection title="Родители" items={parents} onSelect={onSelect} onEdit={() => onManageRelationships("parent")} emptyText="Родители ещё не добавлены" />
@@ -638,6 +697,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
         <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
         <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => { onChange({ ...draft, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }); setErrors((current) => ({ ...current, year: "" })); }}>Неизвестно</button></div><small className="field-hint">Допустимо: 1926, 12.05.1926, «около 1926» или диапазон 1940–1945.</small></div>
+        <DeathFields draft={draft} update={update} onClear={() => onChange({ ...draft, deathDatePrecision: "unknown", deathYear: "", deathDateFrom: "", deathDateTo: "" })} errors={errors} />
         <label className={`field field-full ${errors.place ? "has-error" : ""}`}><span>Место рождения <em>необязательно</em></span><div className="input-with-icon"><MapPin size={17} /><input value={draft.place} onChange={(event) => update("place", event.target.value)} placeholder="Город, область или страна" aria-invalid={Boolean(errors.place)} /></div>{errors.place && <small className="field-error">{errors.place}</small>}</label>
         <label className={`field field-full ${errors.occupation ? "has-error" : ""}`}><span>Профессия <em>необязательно</em></span><div className="input-with-icon"><Briefcase size={17} /><input value={draft.occupation} onChange={(event) => update("occupation", event.target.value)} placeholder="Например, учитель" aria-invalid={Boolean(errors.occupation)} /></div>{errors.occupation && <small className="field-error">{errors.occupation}</small>}</label>
         <label className={`field field-full ${errors.biography ? "has-error" : ""}`}><span>Краткая биография <em>необязательно</em></span><textarea value={draft.biography} onChange={(event) => update("biography", event.target.value)} placeholder="Важные события, интересы, воспоминания..." rows="5" aria-invalid={Boolean(errors.biography)} />{errors.biography && <small className="field-error">{errors.biography}</small>}</label>
@@ -649,7 +709,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
        </>}
       </div>}
       {isNew && wizardStep === 1 && firstPerson && <div className="wizard-first-person-note" role="status"><strong>Это первая запись в дереве</strong><small>Добавьте её без связи — после сохранения можно будет добавлять родителей, детей и других родственников.</small></div>}
-      {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{displayUnknown ? "Неизвестный человек" : personDisplayName(draft)}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь и семейная ситуация</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
+      {isNew && wizardStep === 3 && <div className="wizard-review"><div className="wizard-review-heading"><CheckCircle size={22} weight="fill" /><div><strong>Проверьте запись перед добавлением</strong><small>Если всё верно, нажмите «Добавить человека».</small></div></div><div className="wizard-review-grid"><div><span>ФИО</span><strong>{displayUnknown ? "Неизвестный человек" : personDisplayName(draft)}</strong></div><div><span>Дата рождения</span><strong>{formatDateRecord(getDraftDateRecord(draft)) || "Не указана"}</strong></div><div><span>Дата смерти</span><strong>{formatDateRecord(getDraftDateRecord(draft, "death")) || "Не указана"}</strong></div><div><span>Место рождения</span><strong>{draft.place.trim() || "Не указано"}</strong></div><div><span>Место смерти</span><strong>{draft.deathPlace?.trim() || "Не указано"}</strong></div><div><span>Фото</span><strong>{draft.image ? "Добавлено" : "Не добавлено"}</strong></div></div><div className="wizard-review-relation"><Link size={18} /><div><span>Связь и семейная ситуация</span><strong>{relationSummary}</strong><small>{relationDescription}</small></div></div></div>}
       <div className="editor-footer"><button type="button" className="button button-ghost" onClick={onCancel}>Отмена</button>{isNew && wizardStep > 1 && <button type="button" className="button button-secondary" onClick={handleBack}>Назад</button>}{isNew && wizardStep < 3 && <button type="button" className="button button-primary save-button" onClick={handleNext} disabled={wizardStep === 1 && Boolean(relationshipMode) && !connectionTargetId}>{wizardStep === 1 ? "К сведениям" : "К проверке"}</button>}{(!isNew || wizardStep === 3) && <button type="button" className="button button-primary save-button" onClick={handleSave}><FloppyDisk size={18} weight="bold" /> {isNew ? "Добавить человека" : "Сохранить"}</button>}</div>
     </div>
   );
@@ -1682,10 +1742,11 @@ export function App() {
     const existing = people.find((person) => person.id === personId);
     if (!existing) return;
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draftValue));
+    const normalizedDeathFields = deathFieldsFromDraft(draftValue);
     const isUnknown = Boolean(draftValue.isUnknown);
     const normalizedNameRecord = normalizePersonNames({ ...existing, ...draftValue, isUnknown });
     const normalizedName = isUnknown ? "" : normalizedNameRecord.name || "Человек без имени";
-    const nextPerson = { ...normalizedNameRecord, isUnknown, name: normalizedName, shortName: normalizedName, surnameHistory: Array.isArray(draftValue.surnameHistory) ? normalizeSurnameHistory(draftValue.surnameHistory) : normalizeSurnameHistory(undefined, draftValue.maidenName), source: String(draftValue.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draftValue.confidence) ? draftValue.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
+    const nextPerson = { ...withoutDeathDateFields(normalizedNameRecord), isUnknown, name: normalizedName, shortName: normalizedName, surnameHistory: Array.isArray(draftValue.surnameHistory) ? normalizeSurnameHistory(draftValue.surnameHistory) : normalizeSurnameHistory(undefined, draftValue.maidenName), source: String(draftValue.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draftValue.confidence) ? draftValue.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to, ...normalizedDeathFields };
     setPeople((current) => current.map((person) => person.id === personId ? nextPerson : person));
     setSelectedPerson(personId);
     setDirty(true);
@@ -1717,7 +1778,7 @@ export function App() {
     const normalizedNameRecord = normalizePersonNames({ ...draft, isUnknown: isUnknownRecord });
     const normalizedName = isUnknownRecord ? "" : normalizedNameRecord.name || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
-    const personToSave = { ...normalizedNameRecord, ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, nameParts: normalizeNameParts(draft.nameParts), nameOrigin: normalizedNameRecord.nameOrigin, surnameHistory: Array.isArray(draft.surnameHistory) ? normalizeSurnameHistory(draft.surnameHistory) : normalizeSurnameHistory(undefined, draft.maidenName), source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
+    const personToSave = { ...withoutDeathDateFields({ ...normalizedNameRecord, ...draft }), isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, nameParts: normalizeNameParts(draft.nameParts), nameOrigin: normalizedNameRecord.nameOrigin, surnameHistory: Array.isArray(draft.surnameHistory) ? normalizeSurnameHistory(draft.surnameHistory) : normalizeSurnameHistory(undefined, draft.maidenName), source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to, ...deathFieldsFromDraft(draft) };
     if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedPerson(personToSave.id); setToast("Изменения сохранены"); } else {
       const newId = makeId();
       const newPerson = { ...personToSave, id: newId };
