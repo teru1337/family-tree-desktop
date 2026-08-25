@@ -1750,7 +1750,7 @@ export function App() {
     recordChange(`Удалена связь: ${relation.label}`, relation.id, [relation.parentId, relation.childId, ...(relation.personIds || [])].filter(Boolean), "delete", "relation");
     const message = `Связь удалена: ${relation.label}`;
     setToast(message);
-    setToastAction({ message, label: "Отменить", onClick: undoAction });
+    setToastAction({ message, label: "Отменить связь", onClick: undoAction });
   };
   const saveBasicSection = (personId, draftValue) => {
     const existing = people.find((person) => person.id === personId);
@@ -1864,6 +1864,7 @@ export function App() {
     }
     recordChange(message, operation.relationId || operation.relation?.id || "", [selectedPerson.id, targetId], "relation-update", "relation");
     setToast(message);
+    setToastAction({ message, label: "Отменить связь", onClick: undoAction });
     setDirty(true);
     setRelationshipEditing(false);
   };
