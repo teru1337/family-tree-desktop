@@ -55,7 +55,7 @@ import { createRenderIndex, visibleEdges } from "./render-index.js";
 import { calculateRelationship, personLabel } from "./relationship-calculator.js";
 import { explainUserError } from "./ui-feedback.js";
 import { createFamilyArchive, verifyFamilyArchive } from "./archive.js";
-import { getSiblingComponent, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
+import { getSiblingComponent, orderChildrenForParent, orderSiblingMembers, reorderSiblingComponent } from "./sibling-order.js";
 import { getNearbyFamilyIds } from "./family-view.js";
 import { canMovePersonNavigation, createPersonNavigation, currentPersonId, movePersonNavigation, visitPerson } from "./person-navigation.js";
 import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_FIELD_LABEL, MAX_CUSTOM_FIELD_VALUE, formatCardFieldLines, normalizeCustomFields, sanitizeCardFields, validateCustomFields } from "./person-fields.js";
@@ -228,11 +228,13 @@ function PersonAvatar({ person, large = false, showPhoto = true }) {
   return showPhoto && person?.image ? <img className={`person-avatar ${large ? "person-avatar-large" : ""}`} src={person.image} alt="" /> : <span className={`person-avatar person-avatar-empty ${large ? "person-avatar-large" : ""}`}><User size={large ? 32 : 20} weight="regular" /></span>;
 }
 
-function TreeNode({ person, position, selected, onSelect, showPhotos, showFormerSurnames, cardFields, dragging, onDragStart, onDragMove, onDragEnd }) {
+function TreeNode({ person, position, selected, onSelect, showPhotos, showFormerSurnames, cardFields, childNumber, dragging, onDragStart, onDragMove, onDragEnd }) {
   const cardLines = formatCardFieldLines(person, cardFields);
   const cardName = formatPersonName(person, { showFormerSurnames });
+  const genderClass = !person.isUnknown && person.gender === "male" ? "tree-node-gender-male" : !person.isUnknown && person.gender === "female" ? "tree-node-gender-female" : "";
   return (
-    <button className={`tree-node ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${cardName}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
+    <button className={`tree-node ${genderClass} ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${cardName}${childNumber ? `, ребёнок номер ${childNumber}` : ""}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
+      {childNumber && <span className="tree-node-child-number" aria-label={`Ребёнок номер ${childNumber}`}>№{childNumber}</span>}
       <PersonAvatar person={person} showPhoto={showPhotos} />
       <span className="tree-node-copy">
         {cardName.split("\n").map((line) => <span key={line} className="tree-node-name">{line}</span>)}
@@ -246,12 +248,12 @@ function Connector({ left, top, width, height = 1, vertical = false, className =
   return <span className={`connector ${vertical ? "connector-vertical" : ""} ${className}`} style={{ left, top, width, height }} />;
 }
 
-function RelationshipItem({ person, onSelect, meta = "", relationshipId = "", source = "" }) {
+function RelationshipItem({ person, onSelect, meta = "", relationshipId = "", source = "", childNumber = null }) {
   if (!person) return null;
   return (
     <button className="relationship-item" type="button" onClick={() => onSelect(person.id)}>
       <PersonAvatar person={person} />
-      <span className="relationship-copy"><span>{personDisplayName(person)}</span><small>{meta || person.year || "дата неизвестна"}</small>{source && <small className="relationship-source">{relationSourceText(source)}</small>}{relationshipId && <small className="relationship-id" title={`Уникальный идентификатор связи: ${relationshipId}`}>ID связи: {relationshipId}</small>}</span>
+      <span className="relationship-copy"><span>{personDisplayName(person)}</span>{childNumber && <small className="relationship-child-number">Ребёнок №{childNumber}</small>}<small>{meta || person.year || "дата неизвестна"}</small>{source && <small className="relationship-source">{relationSourceText(source)}</small>}{relationshipId && <small className="relationship-id" title={`Уникальный идентификатор связи: ${relationshipId}`}>ID связи: {relationshipId}</small>}</span>
     </button>
   );
 }
@@ -325,7 +327,7 @@ function FactSourcesSectionEditor({ person, onSave, onCancel }) {
 }
 
 function RelationSection({ title, items, onSelect, onEdit, emptyText }) {
-  return <section className="relation-section"><div className="section-title-row"><h3>{title}</h3><SectionEditButton label={title} onClick={onEdit} /></div>{items.length ? items.map(({ person, meta, relationshipId, source }) => <RelationshipItem key={`${person.id}-${relationshipId || title}`} person={person} meta={meta} relationshipId={relationshipId} source={source} onSelect={onSelect} />) : <p className="empty-relation">{emptyText}</p>}</section>;
+  return <section className="relation-section"><div className="section-title-row"><h3>{title}</h3><SectionEditButton label={title} onClick={onEdit} /></div>{items.length ? items.map(({ person, meta, relationshipId, source, childNumber }) => <RelationshipItem key={`${person.id}-${relationshipId || title}`} person={person} meta={meta} relationshipId={relationshipId} source={source} childNumber={childNumber} onSelect={onSelect} />) : <p className="empty-relation">{emptyText}</p>}</section>;
 }
 
 function SiblingOrderSection({ person, siblings, onMove }) {
@@ -384,12 +386,12 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
     const inverseRole = partnerRole(partner, partnership);
     return { person: partner, meta: `${partnershipDescription(partnership)} · вы для него: ${currentRole} · он/она для вас: ${inverseRole}`, source: partnership?.source, relationshipId: partnership?.id || `partnership-${[person.id, partnerId].sort().join("-")}` };
   }).filter((item) => item.person);
-  const children = (person.childIds || []).map((childId) => {
-    const child = find(childId);
+  const children = orderChildrenForParent(person, people).map((child, childIndex) => {
+    const childId = child.id;
     const parentLink = child?.parentLinks?.find((link) => link.personId === person.id);
     const type = parentLink?.type || "biological";
     const roles = childRelationshipRoles(type, person, child);
-    return { person: child, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, source: parentLink?.source, relationshipId: parentLink?.id || makeParentLinkId(child?.id || childId, person.id, type) };
+    return { person: child, childNumber: childIndex + 1, meta: `${roles.currentRole} · вы для него: ${roles.inverseRole}`, source: parentLink?.source, relationshipId: parentLink?.id || makeParentLinkId(child?.id || childId, person.id, type) };
   }).filter((item) => item.person);
   const siblingLinks = person.siblingLinks?.length ? person.siblingLinks : (person.siblingIds || []).map((siblingId) => ({ id: makeSiblingLinkId(person.id, siblingId, "biological"), personId: siblingId, type: "biological" }));
   const siblingItems = siblingLinks.map((link) => {
@@ -687,13 +689,38 @@ function RelationshipEditor({ person, people, partnerships, initialKind = "paren
 }
 
 function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, renderIndex = null, strictVisible = false }) {
+  const [expandedLabelId, setExpandedLabelId] = useState("");
   const byId = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships, byId), [people, partnerships, byId]);
   const index = renderIndex || fallbackIndex;
   const edgeVisible = (edge, firstId, secondId) => !strictVisible || !visibleIds || (visibleIds.has(firstId) && visibleIds.has(secondId));
   const parentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds).filter((edge) => positions[edge.parent.id] && positions[edge.child.id] && edgeVisible(edge, edge.parent.id, edge.child.id)), [index, positions, visibleIds, strictVisible]);
   const partnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds).filter((edge) => positions[edge.first.id] && positions[edge.second.id] && edgeVisible(edge, edge.first.id, edge.second.id)), [index, positions, visibleIds, strictVisible]);
-  return <svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const geometry = verticalConnection(positions[parent.id], positions[child.id]); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""}`} d={geometry.path} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const geometry = horizontalConnection(positions[first.id], positions[second.id]); const label = partnership.status === "divorced" ? "Развод" : partnershipTypeLabel[partnership.type] || "Связь"; return <g key={partnership.id}><path className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""}`} d={geometry.path} /><text className="partnership-label" x={geometry.middleX} y={Math.min(geometry.startY, geometry.endY) - 8} textAnchor="middle">{label}</text></g>; })}</g></svg>;
+  const labels = [
+    ...parentEdges.map(({ parent, child, type }) => {
+      const geometry = verticalConnection(positions[parent.id], positions[child.id]);
+      const roles = parentRelationshipRoles(type, parent, child);
+      return {
+        id: `parent-${parent.id}-${child.id}-${type}`,
+        short: type === "biological" ? "Родство" : relationTypeLabel[type] || "Родство",
+        full: `${roles.currentRole} — ${roles.inverseRole}`,
+        left: (geometry.startX + geometry.endX) / 2,
+        top: geometry.middleY,
+      };
+    }),
+    ...partnerEdges.map(({ partnership, first, second }) => {
+      const geometry = horizontalConnection(positions[first.id], positions[second.id]);
+      const short = partnership.status === "divorced" ? "Развод" : partnershipTypeLabel[partnership.type] || "Связь";
+      return {
+        id: `partnership-${partnership.id}`,
+        short,
+        full: `${short}: ${personDisplayName(first)} — ${personDisplayName(second)}`,
+        left: geometry.middleX,
+        top: Math.min(geometry.startY, geometry.endY) - 8,
+      };
+    }),
+  ];
+  return <><svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const geometry = verticalConnection(positions[parent.id], positions[child.id]); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""}`} d={geometry.path} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const geometry = horizontalConnection(positions[first.id], positions[second.id]); return <path key={partnership.id} className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""}`} d={geometry.path} />; })}</g></svg><div className="tree-connection-labels" aria-label="Подписи семейных связей">{labels.map((label) => { const expanded = expandedLabelId === label.id; return <button key={label.id} type="button" className={`connection-label ${expanded ? "expanded" : ""}`} style={{ left: label.left, top: label.top }} aria-expanded={expanded} title={expanded ? "Свернуть полное название связи" : label.full} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setExpandedLabelId((current) => current === label.id ? "" : label.id); }}>{expanded ? label.full : label.short}</button>; })}</div></>;
 }
 
 function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewportSize, onNavigate, renderIndex = null }) {
@@ -728,6 +755,26 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const renderIndex = useMemo(() => createRenderIndex(people, partnerships, peopleById), [people, partnerships, peopleById]);
+  const childNumberById = useMemo(() => {
+    const childIdsByParent = new Map();
+    const addChild = (parentId, childId) => {
+      if (!parentId || !childId) return;
+      if (!childIdsByParent.has(parentId)) childIdsByParent.set(parentId, new Set());
+      childIdsByParent.get(parentId).add(childId);
+    };
+    people.forEach((parent) => (parent.childIds || []).forEach((childId) => addChild(parent.id, childId)));
+    people.forEach((child) => {
+      const links = child.parentLinks?.length ? child.parentLinks : (child.parentIds || []).map((parentId) => ({ personId: parentId }));
+      links.forEach((link) => addChild(link.personId, child.id));
+    });
+    const result = new Map();
+    childIdsByParent.forEach((childIds, parentId) => {
+      const parent = peopleById.get(parentId);
+      const ordered = orderChildrenForParent({ ...(parent || {}), childIds: [...childIds] }, people);
+      ordered.forEach((child, index) => { if (!result.has(child.id)) result.set(child.id, index + 1); });
+    });
+    return result;
+  }, [people, peopleById]);
   const renderedPositions = useMemo(() => Object.fromEntries(Object.entries(layout.positions).map(([id, position]) => {
     const offset = manualOffsets[id] || { x: 0, y: 0 };
     return [id, { ...position, left: position.left + offset.x, top: position.top + offset.y }];
@@ -887,7 +934,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "nearby" ? "selected" : ""} aria-pressed={viewMode === "nearby"} onClick={() => onViewModeChange?.("nearby")} disabled={!selectedId}>Ближайшая семья</button></div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} strictVisible={viewMode === "nearby"} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} strictVisible={viewMode === "nearby"} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{viewMode === "nearby" ? "Ближайшая семья" : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>

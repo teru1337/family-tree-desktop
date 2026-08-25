@@ -11,6 +11,7 @@ export default defineConfig({
           "person-names": ["./src/person-names.js"],
           dates: ["./src/dates.js"],
           timeline: ["./src/timeline.js"],
+          "sibling-order": ["./src/sibling-order.js"],
         },
       },
     },

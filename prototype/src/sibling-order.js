@@ -13,6 +13,22 @@ function birthYearFor(person) {
   return Number.POSITIVE_INFINITY;
 }
 
+function birthDateFor(person) {
+  const value = String(person?.birthDate?.value || person?.birthDate?.text || person?.year || "").trim();
+  const dayMonthYear = value.match(/(^|\D)(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})(?:\D|$)/);
+  if (dayMonthYear) {
+    const [, , day, month, year] = dayMonthYear;
+    return Number(`${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`);
+  }
+  const yearMonthDay = value.match(/(^|\D)(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\D|$)/);
+  if (yearMonthDay) {
+    const [, , year, month, day] = yearMonthDay;
+    return Number(`${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`);
+  }
+  const year = birthYearFor(person);
+  return Number.isFinite(year) ? year * 10000 : Number.POSITIVE_INFINITY;
+}
+
 function manualOrderFor(person) {
   const value = person?.siblingOrder;
   if (value === "" || value === null || value === undefined) return Number.POSITIVE_INFINITY;
@@ -24,9 +40,9 @@ export function compareSiblingPeople(first, second, firstIndex = 0, secondIndex 
   const firstManual = manualOrderFor(first);
   const secondManual = manualOrderFor(second);
   if (firstManual !== secondManual) return firstManual - secondManual;
-  const firstBirthYear = birthYearFor(first);
-  const secondBirthYear = birthYearFor(second);
-  if (firstBirthYear !== secondBirthYear) return firstBirthYear - secondBirthYear;
+  const firstBirthDate = birthDateFor(first);
+  const secondBirthDate = birthDateFor(second);
+  if (firstBirthDate !== secondBirthDate) return firstBirthDate - secondBirthDate;
   const names = String(first?.name || first?.shortName || "").localeCompare(String(second?.name || second?.shortName || ""), "ru");
   return names || firstIndex - secondIndex;
 }
@@ -36,6 +52,17 @@ export function orderSiblingMembers(members) {
     .map((person, index) => ({ person, index }))
     .sort((first, second) => compareSiblingPeople(first.person, second.person, first.index, second.index))
     .map(({ person }) => person);
+}
+
+export function orderChildrenForParent(parent, people) {
+  const byId = new Map((Array.isArray(people) ? people : []).map((person) => [person.id, person]));
+  const childIds = [...new Set((Array.isArray(parent?.childIds) ? parent.childIds : []).map((id) => String(id)).filter(Boolean))];
+  return orderSiblingMembers(childIds.map((id) => byId.get(id)).filter(Boolean));
+}
+
+export function childNumberFor(parent, childId, people) {
+  const index = orderChildrenForParent(parent, people).findIndex((child) => child.id === childId);
+  return index < 0 ? null : index + 1;
 }
 
 export function getSiblingComponent(people, personId) {
