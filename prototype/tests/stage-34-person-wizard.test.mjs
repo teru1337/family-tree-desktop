@@ -17,9 +17,9 @@ test("wizard exposes explicit scenarios for incomplete family data", () => {
 });
 
 test("repeated add keeps the selected relation target for multiple relatives or partnerships", () => {
-  assert.match(appSource, /setRelationshipMode\(relationshipMode\)/);
-  assert.match(appSource, /setConnectionTargetId\(relationTarget\?\.id \|\| ""\)/);
-  assert.match(appSource, /setPartnershipType\(partnershipType\)/);
+  assert.match(appSource, /onRelationChange=\{setRelationshipMode\}/);
+  assert.match(appSource, /onConnectionTargetChange=\{setConnectionTargetId\}/);
+  assert.match(appSource, /onPartnershipTypeChange=\{setPartnershipType\}/);
 });
 
 test("first person can be added without an unavailable relation target", () => {
@@ -35,9 +35,9 @@ test("person creation wizard keeps navigation, cancel and save buttons wired", (
   assert.match(appSource, /onClick=\{handleBack\}>Назад/);
   assert.match(appSource, /onClick=\{handleNext\}/);
   assert.match(appSource, /wizardStep === 1 \? "К сведениям" : "К проверке"/);
-  assert.match(appSource, /onClick=\{\(\) => handleSave\(true\)\}/);
-  assert.match(appSource, /Сохранить и добавить ещё одного/);
-  assert.match(appSource, /onClick=\{\(\) => handleSave\(false\)\}/);
+  assert.doesNotMatch(appSource, /handleSave\(true\)/);
+  assert.doesNotMatch(appSource, /Сохранить и добавить ещё одного/);
+  assert.match(appSource, /onClick=\{handleSave\}/);
   assert.match(appSource, /\{isNew \? "Добавить человека" : "Сохранить"\}/);
 });
 

@@ -18,10 +18,10 @@ test("filters people by generation, relation, date and birthplace", () => {
   assert.deepEqual(filterPeople(people, [], positions, "мария", DEFAULT_SEARCH_FILTERS).map((person) => person.id), ["child"]);
 });
 
-test("exposes navigation commands and add-another flow in the UI", async () => {
+test("exposes navigation commands and keeps the single-save wizard flow", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(source, /Сохранить и добавить ещё одного/);
+  assert.doesNotMatch(source, /Сохранить и добавить ещё одного/);
   assert.match(source, /Показать всё дерево/);
   assert.match(source, /Вернуться к выбранному человеку/);
   assert.match(source, /SearchFilterPanel/);
