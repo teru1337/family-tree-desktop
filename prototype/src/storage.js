@@ -4,6 +4,7 @@ import { normalizeCustomFields } from "./person-fields.js";
 import { normalizePersonNames } from "./person-names.js";
 import { normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents } from "./timeline.js";
 import { normalizePlaceDetails, sanitizeProjectSettings } from "./geocoder.js";
+import { normalizeChangeLog, normalizeRecordOrigin } from "./change-log.js";
 
 export const PROJECT_FORMAT = "familytree";
 export const PROJECT_VERSION = 7;
@@ -49,6 +50,7 @@ function normalizePersonMetadata(person) {
     factSources: normalizeFactSources(person?.factSources),
     timelineEvents: normalizeTimelineEvents(person?.timelineEvents),
   };
+  if (person?.recordOrigin) normalized.recordOrigin = normalizeRecordOrigin(person.recordOrigin);
   const placeDetails = normalizePlaceDetails(person?.placeDetails);
   return placeDetails ? { ...normalized, placeDetails } : normalized;
 }
@@ -524,6 +526,7 @@ export function createProjectPayload(people, project = {}, relationships = proje
   const photos = normalizePhotos(project.photos, normalizedPeople, normalizedPeopleIds);
   const peopleWithCompatibility = attachLegacyRelations(normalizedPeople, relations);
   const peopleWithPhotos = attachPhotos(peopleWithCompatibility, photos);
+  const normalizedChangeLog = normalizeChangeLog(project.changeLog);
   return {
     manifest: {
       format: PROJECT_FORMAT,
@@ -537,6 +540,7 @@ export function createProjectPayload(people, project = {}, relationships = proje
       title: project.title || "Моё семейное древо",
       fileName: project.fileName || "семейное-древо.familytree",
       settings: sanitizeProjectSettings(project.settings),
+      ...(normalizedChangeLog.length ? { changeLog: normalizedChangeLog } : {}),
     },
     people: peopleWithPhotos,
     relations,
@@ -578,6 +582,7 @@ export function normalizeProject(raw) {
   const validationWarnings = [...report.warnings];
   if (migratedFrom) validationWarnings.unshift(`Формат проекта обновлён с версии ${migratedFrom} до версии ${PROJECT_VERSION}.`);
 
+  const normalizedChangeLog = normalizeChangeLog(migrated.project?.changeLog);
   return {
     manifest: { ...migrated.manifest, version: PROJECT_VERSION, schemaVersion: PROJECT_VERSION },
     project: {
@@ -585,6 +590,7 @@ export function normalizeProject(raw) {
       title: migrated.project?.title || "Моё семейное древо",
       fileName: migrated.project?.fileName || "семейное-древо.familytree",
       settings: sanitizeProjectSettings(migrated.project?.settings),
+      ...(normalizedChangeLog.length ? { changeLog: normalizedChangeLog } : {}),
       createdAt: migrated.manifest.createdAt,
       updatedAt: migrated.manifest.updatedAt,
     },

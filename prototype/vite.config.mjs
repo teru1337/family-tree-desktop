@@ -15,6 +15,8 @@ export default defineConfig({
           "family-view": ["./src/family-view.js"],
           "relationship-calculator": ["./src/relationship-calculator.js"],
           geocoder: ["./src/geocoder.js"],
+          "change-log": ["./src/change-log.js"],
+          storage: ["./src/storage.js"],
         },
       },
     },

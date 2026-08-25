@@ -65,10 +65,13 @@ import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
 import { applyRelationOperation, normalizeRelationState } from "./relation-operations.js";
 import { applySuggestedChildSurname, formerSurnames, formatPersonName, normalizeNameParts, normalizePersonNames, normalizeSurnameHistory, surnameSuggestionsForChild } from "./person-names.js";
 import { validateBasicPersonSection, validateFactSourcesSection, validateTimelineSection } from "./section-validation.js";
+import { appendChangeLog, normalizeRecordOrigin, recordOriginLabel } from "./change-log.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
 const AddressField = lazy(() => import("./AddressField.jsx").then(({ AddressField: Component }) => ({ default: Component })));
+const RecordOriginField = lazy(() => import("./RecordOriginField.jsx").then(({ RecordOriginField: Component }) => ({ default: Component })));
+const ChangeLogModal = lazy(() => import("./ChangeLogModal.jsx").then(({ ChangeLogModal: Component }) => ({ default: Component })));
 
 const BRAND_MARK_SRC = "/branding/family-circle.svg";
 
@@ -78,7 +81,7 @@ function BrandMark({ className = "" }) {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, deathYear: "", deathDatePrecision: "", deathDateFrom: "", deathDateTo: "", place: "", placeDetails: null, image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, recordOrigin: { status: "manual", source: "" }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, deathYear: "", deathDatePrecision: "", deathDateFrom: "", deathDateTo: "", place: "", placeDetails: null, image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
 const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
@@ -336,6 +339,7 @@ function BasicPersonSectionEditor({ person, onSave, onCancel }) {
     <label className="unknown-person-toggle field-full"><input type="checkbox" checked={Boolean(draft.isUnknown)} onChange={(event) => update("isUnknown", event.target.checked)} /><span><strong>Неизвестный человек</strong><small>ФИО можно оставить пустым, если имя пока неизвестно.</small></span></label>
     <Suspense fallback={null}><NameEditorFields draft={draft} onChange={setDraft} errors={errors} /><NameEditorFields kind="history" value={draft.surnameHistory} error={errors.surnameHistory} onChange={(value) => update("surnameHistory", value)} /></Suspense>
     <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
+    <Suspense fallback={null}><RecordOriginField value={draft.recordOrigin} onChange={(value) => update("recordOrigin", value)} /></Suspense>
     <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year || ""} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
     <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => setDraft((current) => ({ ...current, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }))}>Неизвестно</button></div></div>
     <DeathFields draft={draft} update={update} onClear={() => setDraft((current) => ({ ...current, deathDatePrecision: "unknown", deathYear: "", deathDateFrom: "", deathDateTo: "" }))} errors={errors} />
@@ -464,7 +468,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   return (
     <div className="detail-content">
       <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}{deathDateText(person) ? ` · † ${deathDateText(person)}` : ""}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div>{person.deathPlace && <div className="profile-place profile-death-place"><MapPin size={17} /> {person.deathPlace}</div>}</div><div className="profile-actions"><div className="person-navigation-actions"><button type="button" className="button button-secondary person-nav-button" onClick={onPreviousPerson} disabled={!canGoPrevious}><CaretLeft size={17} /> Предыдущий</button><button type="button" className="button button-secondary person-nav-button" onClick={onNextPerson} disabled={!canGoNext}>Следующий <CaretRight size={17} /></button></div><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
-      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><SectionEditButton label="Основная информация" onClick={() => setEditingSection("basic")} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Дата смерти</dt><dd>{deathDateText(person) || "—"}</dd></div><div><dt>Место смерти</dt><dd>{person.deathPlace || "—"}</dd></div><div><dt>Причина смерти</dt><dd>{person.deathCause || "—"}</dd></div>{person.deathDate && <div><dt>Возраст на момент смерти</dt><dd>{formatAgeAtDeath(person.birthDate, person.deathDate) || "—"}</dd></div>}<div><dt>Источник смерти</dt><dd>{person.deathSource || "—"}</dd></div><div><dt>Комментарий о смерти</dt><dd>{person.deathComment || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Текущая фамилия</dt><dd>{person.nameParts?.familyName || "—"}</dd></div><div><dt>Прежние фамилии</dt><dd>{formerSurnames(person).join(", ") || "—"}</dd></div><div><dt>Происхождение ФИО</dt><dd>{person.nameOrigin?.status === "suggested" ? "Предложено по родителям" : person.nameOrigin?.status === "inferred" ? "Выведено из старой записи" : "Введено пользователем"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
+      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><SectionEditButton label="Основная информация" onClick={() => setEditingSection("basic")} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Дата смерти</dt><dd>{deathDateText(person) || "—"}</dd></div><div><dt>Место смерти</dt><dd>{person.deathPlace || "—"}</dd></div><div><dt>Причина смерти</dt><dd>{person.deathCause || "—"}</dd></div>{person.deathDate && <div><dt>Возраст на момент смерти</dt><dd>{formatAgeAtDeath(person.birthDate, person.deathDate) || "—"}</dd></div>}<div><dt>Источник смерти</dt><dd>{person.deathSource || "—"}</dd></div><div><dt>Комментарий о смерти</dt><dd>{person.deathComment || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Текущая фамилия</dt><dd>{person.nameParts?.familyName || "—"}</dd></div><div><dt>Прежние фамилии</dt><dd>{formerSurnames(person).join(", ") || "—"}</dd></div><div><dt>Происхождение ФИО</dt><dd>{person.nameOrigin?.status === "suggested" ? "Предложено по родителям" : person.nameOrigin?.status === "inferred" ? "Выведено из старой записи" : "Введено пользователем"}</dd></div><div><dt>Происхождение записи</dt><dd>{recordOriginLabel(person.recordOrigin)}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
       <FactSourcesSection person={person} onEdit={() => setEditingSection("sources")} />
       <TimelineSection person={person} onEdit={() => setEditingSection("timeline")} />
       <RelationSection title="Родители" items={parents} onSelect={onSelect} onEdit={() => onManageRelationships("parent")} emptyText="Родители ещё не добавлены" />
@@ -696,6 +700,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         <label className="unknown-person-toggle"><input type="checkbox" checked={displayUnknown} disabled={unknownParent} onChange={(event) => update("isUnknown", event.target.checked)} /><span><strong>{unknownParent ? "Неизвестный родитель" : "Неизвестный человек"}</strong><small>{unknownParent ? "ФИО можно оставить пустым: запись уже будет связана с выбранным человеком." : "Оставьте ФИО пустым, если нужно создать связь без имени."}</small></span></label>
         <Suspense fallback={null}><NameEditorFields draft={draft} onChange={onChange} errors={errors} suggestion={isNew && relationshipMode === "child" ? surnameSuggestion : null} /><NameEditorFields kind="history" value={draft.surnameHistory} error={errors.surnameHistory} onChange={(value) => update("surnameHistory", value)} /></Suspense>
         <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
+        <Suspense fallback={null}><RecordOriginField value={draft.recordOrigin} onChange={(value) => update("recordOrigin", value)} /></Suspense>
         <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
         <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => { onChange({ ...draft, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }); setErrors((current) => ({ ...current, year: "" })); }}>Неизвестно</button></div><small className="field-hint">Допустимо: 1926, 12.05.1926, «около 1926» или диапазон 1940–1945.</small></div>
         <DeathFields draft={draft} update={update} onClear={() => onChange({ ...draft, deathDatePrecision: "unknown", deathYear: "", deathDateFrom: "", deathDateTo: "" })} errors={errors} />
@@ -1357,6 +1362,7 @@ export function App() {
   const [updateOpen, setUpdateOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [qualityReport, setQualityReport] = useState({ valid: true, errors: [], warnings: [] });
+  const [changeLogOpen, setChangeLogOpen] = useState(false);
   const historyRef = useRef(null);
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false });
   const fileInputRef = useRef(null);
@@ -1385,6 +1391,9 @@ export function App() {
     }
     setSelectedId(id);
     return true;
+  };
+  const recordChange = (summary, entityId = "", personIds = [], kind = "update", entityType = "person") => {
+    setProjectMeta((current) => ({ ...current, changeLog: appendChangeLog(current.changeLog, { summary, entityType, entityId, personIds, kind }) }));
   };
   const navigatePersonHistory = (direction) => {
     const next = movePersonNavigation(personNavigationRef.current, direction);
@@ -1547,6 +1556,7 @@ export function App() {
         event.preventDefault();
         if (updateOpen) setUpdateOpen(false);
         else if (qualityOpen) setQualityOpen(false);
+        else if (changeLogOpen) setChangeLogOpen(false);
         else if (pendingUnsavedAction) setPendingUnsavedAction(null);
         else if (deleteConfirmId) setDeleteConfirmId("");
         else if (relationshipDeleteConfirm) setRelationshipDeleteConfirm(null);
@@ -1602,7 +1612,7 @@ export function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [historyStatus, updateOpen, qualityOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
+  }, [historyStatus, updateOpen, qualityOpen, changeLogOpen, pendingUnsavedAction, deleteConfirmId, relationshipDeleteConfirm, newTreeConfirmOpen, exportModalOpen, instructionOpen, settingsOpen, backupOpen, archiveOpen, viewSettingsOpen, filtersOpen, moreOpen, mainMenuOpen, inspectorOpen, returnToMenuAfterModal]);
 
   const checkForUpdates = async () => {
     if (!window.familyTreeDesktop?.checkForUpdates) {
@@ -1646,6 +1656,7 @@ export function App() {
     setDirty(true);
     const movedPerson = nextPeople.find((person) => person.id === personId);
     const position = getSiblingComponent(nextPeople, personId).findIndex((person) => person.id === personId) + 1;
+    recordChange(`Изменён порядок детей: ${personDisplayName(movedPerson)} — место ${position}`, personId, [personId], "sibling-order");
     setToast(`Порядок изменён: ${personDisplayName(movedPerson)} — место ${position}`);
   };
   const openEditor = (person = null, relation = "") => {
@@ -1713,6 +1724,7 @@ export function App() {
     setBackups(readBackups());
     setLastBackupAt(backup?.createdAt || null);
     setDirty(true);
+    recordChange(`Удалён человек: ${personDisplayName(personToDelete)}`, deleteConfirmId, [deleteConfirmId], "delete");
     const message = `Удалён человек: ${personDisplayName(personToDelete)}`;
     setToast(message);
     setToastAction({ message, label: "Отменить", onClick: undoAction });
@@ -1735,6 +1747,7 @@ export function App() {
     setBackups(readBackups());
     setLastBackupAt(backup?.createdAt || null);
     setDirty(true);
+    recordChange(`Удалена связь: ${relation.label}`, relation.id, [relation.parentId, relation.childId, ...(relation.personIds || [])].filter(Boolean), "delete", "relation");
     const message = `Связь удалена: ${relation.label}`;
     setToast(message);
     setToastAction({ message, label: "Отменить", onClick: undoAction });
@@ -1747,21 +1760,28 @@ export function App() {
     const isUnknown = Boolean(draftValue.isUnknown);
     const normalizedNameRecord = normalizePersonNames({ ...existing, ...draftValue, isUnknown });
     const normalizedName = isUnknown ? "" : normalizedNameRecord.name || "Человек без имени";
-    const nextPerson = { ...withoutDeathDateFields(normalizedNameRecord), isUnknown, name: normalizedName, shortName: normalizedName, surnameHistory: Array.isArray(draftValue.surnameHistory) ? normalizeSurnameHistory(draftValue.surnameHistory) : normalizeSurnameHistory(undefined, draftValue.maidenName), source: String(draftValue.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draftValue.confidence) ? draftValue.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to, ...normalizedDeathFields };
+    const nextPerson = { ...withoutDeathDateFields(normalizedNameRecord), isUnknown, name: normalizedName, shortName: normalizedName, recordOrigin: normalizeRecordOrigin(draftValue.recordOrigin), surnameHistory: Array.isArray(draftValue.surnameHistory) ? normalizeSurnameHistory(draftValue.surnameHistory) : normalizeSurnameHistory(undefined, draftValue.maidenName), source: String(draftValue.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draftValue.confidence) ? draftValue.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to, ...normalizedDeathFields };
     setPeople((current) => current.map((person) => person.id === personId ? nextPerson : person));
+    recordChange(`Изменены основные сведения: ${personDisplayName(nextPerson)}`, personId, [personId], "person-update");
     setSelectedPerson(personId);
     setDirty(true);
     setToast("Раздел «Основная информация» сохранён");
   };
   const saveTimelineSection = (personId, events) => {
+    const existing = people.find((person) => person.id === personId);
+    if (!existing) return;
     const nextEvents = normalizeTimelineEvents(events);
     setPeople((current) => current.map((person) => person.id === personId ? { ...person, timelineEvents: nextEvents } : person));
+    recordChange(`Изменена временная шкала: ${personDisplayName(existing)}`, personId, [personId], "timeline-update");
     setDirty(true);
     setToast("Раздел «Временная шкала» сохранён");
   };
   const saveFactSourcesSection = (personId, sources) => {
+    const existing = people.find((person) => person.id === personId);
+    if (!existing) return;
     const nextSources = normalizeFactSources(sources);
     setPeople((current) => current.map((person) => person.id === personId ? { ...person, factSources: nextSources } : person));
+    recordChange(`Изменены источники сведений: ${personDisplayName(existing)}`, personId, [personId], "source-update");
     setDirty(true);
     setToast("Раздел «Источники» сохранён");
   };
@@ -1779,8 +1799,13 @@ export function App() {
     const normalizedNameRecord = normalizePersonNames({ ...draft, isUnknown: isUnknownRecord });
     const normalizedName = isUnknownRecord ? "" : normalizedNameRecord.name || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
-    const personToSave = { ...withoutDeathDateFields({ ...normalizedNameRecord, ...draft }), isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, nameParts: normalizeNameParts(draft.nameParts), nameOrigin: normalizedNameRecord.nameOrigin, surnameHistory: Array.isArray(draft.surnameHistory) ? normalizeSurnameHistory(draft.surnameHistory) : normalizeSurnameHistory(undefined, draft.maidenName), source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to, ...deathFieldsFromDraft(draft) };
-    if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedPerson(personToSave.id); setToast("Изменения сохранены"); } else {
+    const personToSave = { ...withoutDeathDateFields({ ...normalizedNameRecord, ...draft }), isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, nameParts: normalizeNameParts(draft.nameParts), nameOrigin: normalizedNameRecord.nameOrigin, recordOrigin: normalizeRecordOrigin(draft.recordOrigin), surnameHistory: Array.isArray(draft.surnameHistory) ? normalizeSurnameHistory(draft.surnameHistory) : normalizeSurnameHistory(undefined, draft.maidenName), source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to, ...deathFieldsFromDraft(draft) };
+    if (personToSave.id) {
+      setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person));
+      setSelectedPerson(personToSave.id);
+      recordChange(`Изменён человек: ${personDisplayName(personToSave)}`, personToSave.id, [personToSave.id], "person-update");
+      setToast("Изменения сохранены");
+    } else {
       const newId = makeId();
       const newPerson = { ...personToSave, id: newId };
       const relationTarget = people.find((person) => person.id === connectionTargetId);
@@ -1801,6 +1826,7 @@ export function App() {
       personNavigationRef.current = nextNavigation;
       setPersonNavigation(nextNavigation);
       setSelectedId(newId);
+      recordChange(`Добавлен человек: ${personDisplayName(newPerson)}`, newId, [newId, relationTarget?.id].filter(Boolean), "create");
       setToast("Человек добавлен в дерево");
     }
     setDirty(true);
@@ -1836,6 +1862,7 @@ export function App() {
       setToast(explainUserError(error, { action: "Не удалось изменить связь", next: "проверьте участников и повторите" }));
       return;
     }
+    recordChange(message, operation.relationId || operation.relation?.id || "", [selectedPerson.id, targetId], "relation-update", "relation");
     setToast(message);
     setDirty(true);
     setRelationshipEditing(false);
@@ -2172,7 +2199,7 @@ export function App() {
            <button type="button" className="header-action menu-action" onClick={() => setMainMenuOpen(true)}><List size={19} /> Меню</button>
            <button type="button" className="header-action" onClick={() => openExport("pdf")}><Export size={20} /> Экспорт</button>
            <button type="button" className="header-action" onClick={() => openExport("print")}><Printer size={20} /> Печать</button>
-           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setArchiveImport(null); setArchiveOpen(true); }}><Copy size={16} /> Архив материалов</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => openRelationshipCalculator()} disabled={people.length < 2}><UsersThree size={16} /> Узнать родство</button><button type="button" onClick={openQualityCheck}><Info size={16} /> Проверить данные</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
+           <div className="menu-wrap"><button type="button" className="icon-button more-button" onClick={(event) => { event.stopPropagation(); setMoreOpen((open) => !open); }}><DotsThree size={22} weight="bold" /></button>{moreOpen && <div className="dropdown-menu more-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMoreOpen(false); saveCopy(); }}><Copy size={16} /> Сохранить копию</button><button type="button" onClick={() => { setMoreOpen(false); setArchiveImport(null); setArchiveOpen(true); }}><Copy size={16} /> Архив материалов</button><button type="button" onClick={() => { setMoreOpen(false); setBackupOpen(true); }}><ClockCounterClockwise size={16} /> Резервные копии</button><button type="button" onClick={() => { setMoreOpen(false); setChangeLogOpen(true); }}><ClockCounterClockwise size={16} /> История изменений</button><button type="button" onClick={() => openRelationshipCalculator()} disabled={people.length < 2}><UsersThree size={16} /> Узнать родство</button><button type="button" onClick={openQualityCheck}><Info size={16} /> Проверить данные</button><button type="button" onClick={() => { setMoreOpen(false); setViewSettingsOpen(true); }}><TreeStructure size={16} /> Настроить вид дерева</button><button type="button" onClick={() => openSettings(false)}><Note size={16} /> Настройки проекта</button><button type="button" onClick={() => openInstruction(false)}><Info size={16} /> Как это работает</button><button type="button" onClick={() => { setMoreOpen(false); checkForUpdates(); }}><DownloadSimple size={16} /> Проверить обновления</button></div>}</div>
          </div>
        </header>
        <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}>
@@ -2199,6 +2226,7 @@ export function App() {
        {pendingUnsavedAction && <UnsavedChangesModal onSave={() => continueAfterUnsavedChoice(true)} onDiscard={() => continueAfterUnsavedChoice(false)} onCancel={() => setPendingUnsavedAction(null)} />}
        {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
        {qualityOpen && <DataQualityModal report={qualityReport} peopleCount={people.length} onClose={() => setQualityOpen(false)} />}
+       {changeLogOpen && <Suspense fallback={null}><ChangeLogModal entries={projectMeta.changeLog} onClose={() => setChangeLogOpen(false)} /></Suspense>}
        {updateStatus && updateOpen && ["available", "downloading", "downloaded"].includes(updateStatus.state) && <UpdateModal status={updateStatus} onClose={() => setUpdateOpen(false)} onDownload={downloadUpdate} onInstall={installUpdate} onOpenReleases={openReleasesPage} />}
      </div>
   );
