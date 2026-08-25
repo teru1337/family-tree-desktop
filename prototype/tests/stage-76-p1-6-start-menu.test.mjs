@@ -10,20 +10,20 @@ test("starts the Electron window in borderless system fullscreen", async () => {
   assert.doesNotMatch(source, /mainWindow\.maximize\(\)/);
 });
 
-test("provides the animated start-menu scene and an explicit skip action", async () => {
+test("provides the animated start-menu scene without a manual skip action", async () => {
   const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(appSource, /function MainMenuBackground\(\)/);
   assert.match(appSource, /main-menu-background/);
-  assert.match(appSource, /Пропустить анимацию/);
-  assert.match(appSource, /setAnimationActive\(false\)/);
+  assert.doesNotMatch(appSource, /Пропустить анимацию/);
+  assert.doesNotMatch(appSource, /setAnimationActive/);
   assert.match(styles, /main-menu-branch/);
   assert.match(styles, /main-menu-leaf/);
   assert.match(styles, /main-menu-relation-line/);
   assert.match(styles, /main-menu-ghost-card/);
   assert.match(styles, /main-menu-particle/);
   assert.match(styles, /main-menu-rise/);
-  assert.match(styles, /is-animation-skipped.*main-menu-card.*animation: none !important/);
+  assert.doesNotMatch(styles, /is-animation-skipped/);
 });
 
 test("keeps the menu entrance while disabling ambient decoration for reduced motion", async () => {

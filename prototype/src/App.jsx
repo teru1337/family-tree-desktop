@@ -1210,15 +1210,13 @@ function MainMenuBackground() {
 
 function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose, safeMode = false }) {
   const [closing, setClosing] = useState(false);
-  const [animationActive, setAnimationActive] = useState(true);
   const requestClose = () => {
     if (closing) return;
     setClosing(true);
     window.setTimeout(onClose, 160);
   };
-  const skipAnimation = () => setAnimationActive(false);
   return (
-    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""} ${animationActive ? "is-animation-active" : "is-animation-skipped"}`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""} is-animation-active`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <MainMenuBackground />
       <section className="main-menu-card" role="dialog" aria-modal="true" aria-labelledby="main-menu-title" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="icon-button main-menu-close" onClick={requestClose} aria-label="Закрыть главное меню"><X size={21} /></button>
@@ -1231,7 +1229,6 @@ function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose, 
           <button type="button" className="main-menu-action" onClick={onHelp}><Info size={21} /><span><strong>Инструкция для пользователей</strong><small>Пошаговое объяснение с иллюстрациями</small></span><CaretRight size={18} /></button>
           <button type="button" className="main-menu-action main-menu-action-exit" onClick={onExit}><X size={21} /><span><strong>Выход из приложения</strong><small>Закрыть окно программы</small></span></button>
         </div>
-        {animationActive && <button type="button" className="main-menu-skip-animation" onClick={skipAnimation}>Пропустить анимацию</button>}
       </section>
     </div>
   );
