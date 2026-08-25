@@ -24,7 +24,7 @@ const payload = createProjectPayload(project.people, project.project, project.pa
 writeWorkingCopy(payload);
 assert.equal(readWorkingCopy().people.length, 37);
 addBackup(payload, "auto");
-const changedPayload = { ...payload, people: payload.people.slice(0, -1) };
+const changedPayload = createProjectPayload(payload.people.slice(0, -1), project.project, project.partnerships);
 writeWorkingCopy(changedPayload);
 assert.equal(readWorkingCopy().people.length, 36);
 addBackup(changedPayload, "save");

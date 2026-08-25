@@ -58,6 +58,10 @@ function addWarning(warnings, warning) {
   if (warning && !warnings.includes(warning)) warnings.push(warning);
 }
 
+function addError(errors, error) {
+  if (error && !errors.includes(error)) errors.push(error);
+}
+
 function inspectDuplicates(people, warnings) {
   const byName = new Map();
   people.forEach((person) => {
@@ -108,17 +112,33 @@ function inspectTimelineEvents(people, warnings) {
   });
 }
 
-function inspectRelationConsistency(peopleById, relations, warnings) {
+function inspectRelationConsistency(peopleById, relations, warnings, errors) {
   const parentRelations = new Map();
   const activePartnerships = new Map();
-  relations.forEach((relation) => {
+  const relationIds = new Map();
+  const exactPartnerships = new Set();
+  relations.forEach((relation, index) => {
+    const relationId = cleanText(relation?.id);
+    if (relationId) {
+      if (relationIds.has(relationId)) addError(errors, `У связей №${relationIds.get(relationId)} и текущей связи совпадает идентификатор: ${relationId}.`);
+      else relationIds.set(relationId, index + 1);
+    }
     if (relation?.kind === "parent") {
-      const parentId = String(relation.parentId || "");
-      const childId = String(relation.childId || "");
-      if (!parentId || !childId) return;
+      const parentId = String(relation.parentId || relation.fromId || "");
+      const childId = String(relation.childId || relation.toId || "");
+      if (!parentId || !childId) {
+        addError(errors, "Родительская связь неполная: нужны родитель и ребёнок.");
+        return;
+      }
       if (parentId === childId) {
         const person = peopleById.get(parentId);
         addWarning(warnings, `Невозможная связь: «${personLabel(person)}» указан одновременно родителем и ребёнком самого себя.`);
+        addError(errors, "Родительская связь невозможна: человек не может быть родителем самого себя.");
+        return;
+      }
+      const missingIds = [parentId, childId].filter((id) => !peopleById.has(id));
+      if (missingIds.length) {
+        addError(errors, `Родительская связь ссылается на отсутствующего человека: ${missingIds.join(", ")}.`);
         return;
       }
       const type = cleanText(relation.type) || "unknown";
@@ -127,14 +147,35 @@ function inspectRelationConsistency(peopleById, relations, warnings) {
         const parent = peopleById.get(parentId);
         const child = peopleById.get(childId);
         addWarning(warnings, `Возможный дубликат связи: между «${personLabel(parent)}» и «${personLabel(child)}» повторяется один и тот же тип родства. Проверьте ID связей.`);
+        addError(errors, "Каноническая родительская связь дублирует уже существующую связь.");
       } else {
         parentRelations.set(key, relation.id || key);
       }
       return;
     }
-    if (relation?.kind !== "partnership") return;
+    if (relation?.kind !== "partnership" && relation?.kind !== "sibling") {
+      addError(errors, "Связь имеет неизвестный тип и не может быть сохранена.");
+      return;
+    }
     const personIds = Array.isArray(relation.personIds) ? relation.personIds.map(String) : [];
-    if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleById.has(id))) return;
+    if (personIds.length !== 2 || personIds[0] === personIds[1]) {
+      addError(errors, `${relation.kind === "sibling" ? "Связь братьев и сестёр" : "Партнёрская связь"} должна соединять ровно двух разных людей.`);
+      return;
+    }
+    const missingIds = personIds.filter((id) => !peopleById.has(id));
+    if (missingIds.length) {
+      addError(errors, `Связь ссылается на отсутствующего человека: ${missingIds.join(", ")}.`);
+      return;
+    }
+    if (relation.kind === "sibling") {
+      const key = `${[...personIds].sort().join("::")}::${cleanText(relation.type) || "biological"}`;
+      if (exactPartnerships.has(`sibling::${key}`)) addError(errors, "Каноническая связь братьев и сестёр дублирует уже существующую связь.");
+      exactPartnerships.add(`sibling::${key}`);
+      return;
+    }
+    const exactKey = `${[...personIds].sort().join("::")}::${cleanText(relation.type) || "marriage"}::${relation.status || "active"}::${relation.startDate || ""}::${relation.startDatePrecision || "unknown"}::${relation.endDate || ""}::${relation.endDatePrecision || "unknown"}`;
+    if (exactPartnerships.has(exactKey)) addError(errors, "Каноническая партнёрская связь дублирует уже существующую связь.");
+    exactPartnerships.add(exactKey);
     if (relation.status === "divorced") return;
     const pairKey = [...personIds].sort().join("::");
     if (activePartnerships.has(pairKey)) {
@@ -147,7 +188,7 @@ function inspectRelationConsistency(peopleById, relations, warnings) {
   });
 }
 
-function inspectParentRelations(peopleById, relations, warnings) {
+function inspectParentRelations(peopleById, relations, warnings, errors) {
   const parentGraph = new Map();
   relations.filter((relation) => relation?.kind === "parent").forEach((relation) => {
     const parent = peopleById.get(String(relation.parentId || ""));
@@ -176,6 +217,7 @@ function inspectParentRelations(peopleById, relations, warnings) {
       const cycleStart = path.indexOf(personId);
       const cycle = path.slice(cycleStart).sort().join("|");
       addWarning(warnings, `Невозможная связь: родительские записи образуют цикл (${cycle}). Проверьте связи.`);
+      addError(errors, `Родительские связи образуют цикл: ${path.slice(cycleStart).join(" → ")}.`);
       return;
     }
     if (visited.has(personId)) return;
@@ -214,10 +256,11 @@ export function inspectFamilyData(peopleInput, relationsInput = []) {
   const relations = Array.isArray(relationsInput) ? relationsInput : [];
   const peopleById = new Map(people.map((person) => [String(person?.id || ""), person]).filter(([id]) => id));
   const warnings = [];
+  const errors = [];
   inspectDuplicates(people, warnings);
   inspectTimelineEvents(people, warnings);
-  inspectRelationConsistency(peopleById, relations, warnings);
-  inspectParentRelations(peopleById, relations, warnings);
+  inspectRelationConsistency(peopleById, relations, warnings, errors);
+  inspectParentRelations(peopleById, relations, warnings, errors);
   inspectPartnerships(peopleById, relations, warnings);
-  return { warnings };
+  return { errors, warnings };
 }

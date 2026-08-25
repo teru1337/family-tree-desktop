@@ -315,6 +315,11 @@ function normalizeRelations(records, peopleIds) {
   return ensureArray(records).map((record, index) => normalizeRelation(record, index, peopleIds, usedIds, semanticKeys)).filter(Boolean);
 }
 
+export function validateRelationGraph(peopleInput, relationsInput = []) {
+  const report = inspectFamilyData(peopleInput, relationsInput);
+  return { valid: report.errors.length === 0, errors: report.errors };
+}
+
 function attachLegacyRelations(people, relations) {
   const prepared = ensureArray(people).map((person) => ({ ...stripPersonRelations(person), parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [] }));
   const byId = new Map(prepared.map((person) => [person.id, person]));
@@ -358,11 +363,17 @@ function migrateProject(raw) {
   if (!raw || typeof raw !== "object") return { payload: raw, migratedFrom: null };
   const version = Number(raw.manifest?.version);
   if (Array.isArray(raw.people) && (version === 1 || version === 2 || version === 3 || version === 4 || version === 5 || version === 6)) {
-    const migratedRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
+    const migratedPeople = ensureArray(raw.people).map(stripPersonRelations);
+    const migratedPeopleIds = new Set(migratedPeople.map((person) => String(person?.id || "")).filter(Boolean));
+    const sourceRelations = Array.isArray(raw.relations) ? raw.relations : deriveRelationsFromLegacy(raw.people, raw.partnerships);
+    // Старые файлы могли повторно использовать ID link-записей. Сначала
+    // выдаём им стабильные уникальные идентификаторы, затем включаем строгую
+    // проверку канонического графа.
+    const migratedRelations = normalizeRelations(sourceRelations, migratedPeopleIds);
     return {
       payload: {
         ...cloneValue(raw),
-        people: ensureArray(raw.people).map(stripPersonRelations),
+        people: migratedPeople,
         relations: migratedRelations,
         manifest: {
           ...raw.manifest,
@@ -447,24 +458,7 @@ export function validateProject(raw) {
   });
 
   if (version >= 3 && !Array.isArray(raw.relations)) errors.push("В файле отсутствует единая таблица связей.");
-  const relationIds = new Set();
-  ensureArray(raw.relations).forEach((relation, index) => {
-    const id = String(relation?.id || "");
-    if (!id) warnings.push(`У связи №${index + 1} отсутствует идентификатор; он будет создан автоматически.`);
-    if (id && relationIds.has(id)) warnings.push(`В файле повторяется идентификатор связи: ${id}.`);
-    if (id) relationIds.add(id);
-    if (relation?.kind === "parent") {
-      const parentId = String(relation.parentId || "");
-      const childId = String(relation.childId || "");
-      if (!parentId || !childId || parentId === childId || !peopleIds.has(parentId) || !peopleIds.has(childId)) warnings.push(`Родительская связь №${index + 1} неполная и будет пропущена.`);
-    } else if (relation?.kind === "partnership") {
-      const personIds = uniqueIds(relation.personIds);
-      if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleIds.has(id))) warnings.push(`Партнёрская связь №${index + 1} неполная и будет пропущена.`);
-    } else if (relation?.kind === "sibling") {
-      const personIds = uniqueIds(relation.personIds);
-      if (personIds.length !== 2 || personIds[0] === personIds[1] || personIds.some((id) => !peopleIds.has(id))) warnings.push(`Связь братьев и сестёр №${index + 1} неполная и будет пропущена.`);
-    } else warnings.push(`Связь №${index + 1} имеет неизвестный тип и будет пропущена.`);
-  });
+  if (Array.isArray(raw.relations)) errors.push(...validateRelationGraph(raw.people, raw.relations).errors);
 
   if (raw.partnerships !== undefined && !Array.isArray(raw.partnerships)) errors.push("Раздел связей супругов повреждён.");
   ensureArray(raw.partnerships).forEach((partnership, index) => {
