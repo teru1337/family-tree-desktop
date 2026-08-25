@@ -182,6 +182,7 @@ function inspectRelationConsistency(peopleById, relations, warnings, errors) {
       const first = peopleById.get(personIds[0]);
       const second = peopleById.get(personIds[1]);
       addWarning(warnings, `Возможный дубликат связи: у «${personLabel(first)}» и «${personLabel(second)}» несколько активных записей о браке или партнёрстве. Проверьте даты и ID связей.`);
+      addError(errors, "Канонические активные партнёрские связи одной пары противоречат друг другу: завершите предыдущую связь или оставьте одну активную запись.");
     } else {
       activePartnerships.set(pairKey, relation.id || pairKey);
     }
