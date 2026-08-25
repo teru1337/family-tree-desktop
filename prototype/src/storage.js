@@ -236,6 +236,7 @@ function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
   });
 
   const siblingPairs = new Set();
+  const explicitSiblingPairs = new Set();
   const addSibling = (firstId, secondId, type, id, source = "") => {
     if (!peopleIds.has(firstId) || !peopleIds.has(secondId) || firstId === secondId) return;
     const personIds = [firstId, secondId].sort();
@@ -248,8 +249,18 @@ function deriveRelationsFromLegacy(people, legacyPartnerships = []) {
   };
   ensureArray(people).forEach((person) => {
     const personId = String(person?.id || "");
-    ensureArray(person?.siblingLinks).forEach((link) => addSibling(personId, String(link?.personId || ""), link?.type, link?.id, link?.source));
-    uniqueIds(person?.siblingIds).forEach((siblingId) => addSibling(personId, siblingId, "biological"));
+    ensureArray(person?.siblingLinks).forEach((link) => {
+      const siblingId = String(link?.personId || "");
+      addSibling(personId, siblingId, link?.type, link?.id, link?.source);
+      if (peopleIds.has(personId) && peopleIds.has(siblingId) && personId !== siblingId) explicitSiblingPairs.add([personId, siblingId].sort().join("::"));
+    });
+  });
+  ensureArray(people).forEach((person) => {
+    const personId = String(person?.id || "");
+    uniqueIds(person?.siblingIds).forEach((siblingId) => {
+      const pairKey = [personId, siblingId].sort().join("::");
+      if (!explicitSiblingPairs.has(pairKey)) addSibling(personId, siblingId, "biological");
+    });
   });
 
   const addPartnership = (partnership, index) => {

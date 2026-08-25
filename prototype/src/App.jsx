@@ -61,6 +61,7 @@ import { canMovePersonNavigation, createPersonNavigation, currentPersonId, moveP
 import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_FIELD_LABEL, MAX_CUSTOM_FIELD_VALUE, formatCardFieldLines, normalizeCustomFields, sanitizeCardFields, validateCustomFields } from "./person-fields.js";
 import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_PLACE, MAX_EVENT_SOURCE, MAX_EVENT_TITLE, MAX_TIMELINE_EVENTS, TIMELINE_EVENT_TYPES, normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents, sortTimelineEvents, timelineEventLabel, validateFactSources, validateTimelineEvents } from "./timeline.js";
 import { buildTreeLayout } from "./tree-layout.js";
+import { applyRelationOperation, normalizeRelationState } from "./relation-operations.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 
@@ -1523,16 +1524,9 @@ export function App() {
     const personToDelete = people.find((person) => person.id === deleteConfirmId);
     if (!personToDelete) return;
     const backup = addBackup(buildPayload(), "before-delete");
-    const nextPeople = people.filter((person) => person.id !== deleteConfirmId).map((person) => ({
-      ...person,
-      parentIds: (person.parentIds || []).filter((id) => id !== deleteConfirmId),
-      parentLinks: (person.parentLinks || []).filter((link) => link.personId !== deleteConfirmId),
-      partnerIds: (person.partnerIds || []).filter((id) => id !== deleteConfirmId),
-      childIds: (person.childIds || []).filter((id) => id !== deleteConfirmId),
-      siblingIds: (person.siblingIds || []).filter((id) => id !== deleteConfirmId),
-      siblingLinks: (person.siblingLinks || []).filter((link) => link.personId !== deleteConfirmId),
-    }));
-    const nextPartnerships = partnerships.filter((partnership) => !partnership.personIds.includes(deleteConfirmId));
+    const nextGraph = applyRelationOperation(people, partnerships, { type: "remove-person", personId: deleteConfirmId });
+    const nextPeople = nextGraph.people;
+    const nextPartnerships = nextGraph.partnerships;
     const fallbackId = [personToDelete.parentIds?.[0], personToDelete.partnerIds?.[0], personToDelete.childIds?.[0]].find((id) => nextPeople.some((person) => person.id === id)) || nextPeople[0]?.id || "";
     setPeople(nextPeople);
     setPartnerships(nextPartnerships);
@@ -1562,41 +1556,9 @@ export function App() {
     const relation = relationshipDeleteConfirm;
     if (!relation) return;
     const backup = addBackup(buildPayload(), "before-delete");
-    const makeParentLinks = (person) => person.parentLinks?.length
-      ? person.parentLinks
-      : (person.parentIds || []).map((parentId) => ({ id: makeParentLinkId(person.id, parentId, "biological"), personId: parentId, type: "biological" }));
-    const makeSiblingLinks = (person) => person.siblingLinks?.length
-      ? person.siblingLinks
-      : (person.siblingIds || []).map((siblingId) => ({ id: makeSiblingLinkId(person.id, siblingId, "biological"), personId: siblingId, type: "biological" }));
-    let nextPeople = people;
-    let nextPartnerships = partnerships;
-    if (relation.kind === "partnership") {
-      nextPartnerships = partnerships.filter((partnership) => partnership.id !== relation.id);
-      const stillConnected = nextPartnerships.some((partnership) => relation.personIds.every((id) => partnership.personIds.includes(id)));
-      nextPeople = people.map((person) => relation.personIds.includes(person.id) && !stillConnected ? { ...person, partnerIds: (person.partnerIds || []).filter((id) => !relation.personIds.includes(id)) } : person);
-    }
-    if (relation.kind === "parent") {
-      const remainingParentRelation = (personId) => nextPeople.some((person) => makeParentLinks(person).some((link) => link.id !== relation.id && link.personId === relation.parentId && person.id === relation.childId));
-      nextPeople = people.map((person) => {
-        if (person.id === relation.childId) {
-          const parentLinks = makeParentLinks(person).filter((link) => link.id !== relation.id && !(link.personId === relation.parentId && link.type === relation.type));
-          const parentIds = relation.type === "biological" && !remainingParentRelation(person.id) ? (person.parentIds || []).filter((id) => id !== relation.parentId) : [...(person.parentIds || [])];
-          return { ...person, parentIds, parentLinks };
-        }
-        if (person.id === relation.parentId && !remainingParentRelation(relation.childId)) return { ...person, childIds: (person.childIds || []).filter((id) => id !== relation.childId) };
-        return person;
-      });
-    }
-    if (relation.kind === "sibling") {
-      const [firstId, secondId] = relation.personIds;
-      nextPeople = people.map((person) => {
-        if (person.id !== firstId && person.id !== secondId) return person;
-        const otherId = person.id === firstId ? secondId : firstId;
-        const siblingLinks = makeSiblingLinks(person).filter((link) => link.id !== relation.id && !(link.personId === otherId && link.type === relation.type));
-        const hasRemainingSibling = siblingLinks.some((link) => link.personId === otherId);
-        return { ...person, siblingIds: hasRemainingSibling ? [...(person.siblingIds || [])] : (person.siblingIds || []).filter((id) => id !== otherId), siblingLinks };
-      });
-    }
+    const nextGraph = applyRelationOperation(people, partnerships, { type: "remove", relationId: relation.id });
+    const nextPeople = nextGraph.people;
+    const nextPartnerships = nextGraph.partnerships;
     setPeople(nextPeople);
     setPartnerships(nextPartnerships);
     setRelationshipDeleteConfirm(null);
@@ -1623,36 +1585,22 @@ export function App() {
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
     const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
     if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedPerson(personToSave.id); setToast("Изменения сохранены"); } else {
-      const newId = makeId(); const newPerson = { ...personToSave, id: newId };
+      const newId = makeId();
+      const newPerson = { ...personToSave, id: newId };
       const relationTarget = people.find((person) => person.id === connectionTargetId);
       const selectedRelationType = relationshipType || "biological";
-      setPeople((current) => {
-        const next = current.map((person) => ({ ...person, parentIds: [...(person.parentIds || [])], parentLinks: [...(person.parentLinks || (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(person.id, personId, "biological"), personId, type: "biological" })))], partnerIds: [...(person.partnerIds || [])], childIds: [...(person.childIds || [])], siblingIds: [...(person.siblingIds || [])], siblingLinks: [...(person.siblingLinks || (person.siblingIds || []).map((personId) => ({ id: makeSiblingLinkId(person.id, personId, "biological"), personId, type: "biological" })))] }));
-        if (relationTarget && relationshipMode === "child") {
-          if (selectedRelationType === "biological") newPerson.parentIds = addUniqueId(newPerson.parentIds, relationTarget.id);
-          newPerson.parentLinks = addParentLink(newPerson.parentLinks, relationTarget.id, selectedRelationType, newId, relationshipSource);
-          next.forEach((person) => { if (person.id === relationTarget.id) person.childIds = addUniqueId(person.childIds, newId); });
-        }
-        if (relationTarget && relationshipMode === "parent") {
-          newPerson.childIds = addUniqueId(newPerson.childIds, relationTarget.id);
-            next.forEach((person) => { if (person.id === relationTarget.id) { if (selectedRelationType === "biological") person.parentIds = addUniqueId(person.parentIds, newId); person.parentLinks = addParentLink(person.parentLinks, newId, selectedRelationType, person.id, relationshipSource); } });
-        }
-        if (relationTarget && relationshipMode === "partner") {
-          newPerson.partnerIds = addUniqueId(newPerson.partnerIds, relationTarget.id);
-          next.forEach((person) => { if (person.id === relationTarget.id) person.partnerIds = addUniqueId(person.partnerIds, newId); });
-        }
-        if (relationTarget && relationshipMode === "sibling") {
-          newPerson.siblingIds = addUniqueId(newPerson.siblingIds, relationTarget.id);
-          newPerson.siblingLinks = addSiblingLink(newPerson.siblingLinks, relationTarget.id, selectedRelationType, newId, relationshipSource);
-          next.forEach((person) => {
-            if (person.id !== relationTarget.id) return;
-            person.siblingIds = addUniqueId(person.siblingIds, newId);
-            person.siblingLinks = addSiblingLink(person.siblingLinks, newId, selectedRelationType, person.id, relationshipSource);
-          });
-        }
-        return [...next, newPerson];
-      });
-      if (relationTarget && relationshipMode === "partner") setPartnerships((current) => [...current, { id: `partnership-${relationTarget.id}-${newId}`, personIds: [relationTarget.id, newId], type: partnershipType, status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown", source: normalizeSourceValue(relationshipSource) }]);
+      const relation = relationTarget && relationshipMode === "child"
+        ? { id: makeParentLinkId(newId, relationTarget.id, selectedRelationType), kind: "parent", parentId: relationTarget.id, childId: newId, type: selectedRelationType, source: normalizeSourceValue(relationshipSource) }
+        : relationTarget && relationshipMode === "parent"
+          ? { id: makeParentLinkId(relationTarget.id, newId, selectedRelationType), kind: "parent", parentId: newId, childId: relationTarget.id, type: selectedRelationType, source: normalizeSourceValue(relationshipSource) }
+          : relationTarget && relationshipMode === "sibling"
+            ? { id: makeSiblingLinkId(newId, relationTarget.id, selectedRelationType), kind: "sibling", personIds: [newId, relationTarget.id], type: selectedRelationType, source: normalizeSourceValue(relationshipSource) }
+            : relationTarget && relationshipMode === "partner"
+              ? { id: `partnership-${relationTarget.id}-${newId}`, kind: "partnership", personIds: [relationTarget.id, newId], type: partnershipType, status: "active", startDate: "", startDatePrecision: "unknown", endDate: "", endDatePrecision: "unknown", source: normalizeSourceValue(relationshipSource) }
+              : null;
+      const nextGraph = relation ? applyRelationOperation([...people, newPerson], partnerships, { type: "upsert", relation }) : normalizeRelationState([...people, newPerson], partnerships);
+      setPeople(nextGraph.people);
+      setPartnerships(nextGraph.partnerships);
       const nextNavigation = visitPerson(personNavigationRef.current, newId);
       personNavigationRef.current = nextNavigation;
       setPersonNavigation(nextNavigation);
@@ -1679,43 +1627,35 @@ export function App() {
   };
   const saveRelationship = ({ kind, targetId, parentType, source, startDate, startDatePrecision, endDate, endDatePrecision }) => {
     if (!selectedPerson || !targetId) return;
+    const sourceValue = normalizeSourceValue(source);
+    let operation;
+    let message;
     if (kind === "parent" || kind === "child") {
       const parentId = kind === "parent" ? targetId : selectedPerson.id;
       const childId = kind === "parent" ? selectedPerson.id : targetId;
-      setPeople((current) => current.map((person) => {
-        if (person.id === childId) {
-          const parentIds = parentType === "biological" ? addUniqueId(person.parentIds, parentId) : [...(person.parentIds || [])];
-          const existingLinks = person.parentLinks || (person.parentIds || []).map((personId) => ({ id: makeParentLinkId(childId, personId, "biological"), personId, type: "biological" }));
-          return { ...person, parentIds, parentLinks: addParentLink(existingLinks, parentId, parentType, childId, source) };
-        }
-        if (person.id === parentId) return { ...person, childIds: addUniqueId(person.childIds, childId) };
-        return person;
-      }));
-      setToast(parentType === "adoptive" ? "Усыновление добавлено" : parentType === "step" ? "Степ-родство добавлено" : parentType === "guardian" ? "Опекунство добавлено" : parentType === "unknown" ? "Связь добавлена без уточнения типа" : "Родственная связь добавлена");
+      operation = { type: "upsert", relation: { id: makeParentLinkId(childId, parentId, parentType), kind: "parent", parentId, childId, type: parentType, source: sourceValue } };
+      message = parentType === "adoptive" ? "Усыновление добавлено" : parentType === "step" ? "Степ-родство добавлено" : parentType === "guardian" ? "Опекунство добавлено" : parentType === "unknown" ? "Связь добавлена без уточнения типа" : "Родственная связь добавлена";
     } else if (kind === "sibling") {
-      setPeople((current) => current.map((person) => {
-        if (person.id === selectedPerson.id) return { ...person, siblingIds: addUniqueId(person.siblingIds, targetId), siblingLinks: addSiblingLink(person.siblingLinks, targetId, parentType, person.id, source) };
-        if (person.id === targetId) return { ...person, siblingIds: addUniqueId(person.siblingIds, selectedPerson.id), siblingLinks: addSiblingLink(person.siblingLinks, selectedPerson.id, parentType, person.id, source) };
-        return person;
-      }));
-      setToast(parentType === "half" ? "Неполнородная связь добавлена" : parentType === "step" ? "Сводная связь добавлена" : parentType === "unknown" ? "Связь братьев и сестёр добавлена без уточнения типа" : "Связь братьев и сестёр добавлена");
+      operation = { type: "upsert", relation: { id: makeSiblingLinkId(selectedPerson.id, targetId, parentType), kind: "sibling", personIds: [selectedPerson.id, targetId], type: parentType, source: sourceValue } };
+      message = parentType === "half" ? "Неполнородная связь добавлена" : parentType === "step" ? "Сводная связь добавлена" : parentType === "unknown" ? "Связь братьев и сестёр добавлена без уточнения типа" : "Связь братьев и сестёр добавлена";
     } else if (kind === "marriage" || kind === "partnership") {
-      setPeople((current) => current.map((person) => person.id === selectedPerson.id ? { ...person, partnerIds: addUniqueId(person.partnerIds, targetId) } : person.id === targetId ? { ...person, partnerIds: addUniqueId(person.partnerIds, selectedPerson.id) } : person));
-      const pair = [selectedPerson.id, targetId];
-      setPartnerships((current) => {
-        const existingIndex = [...current].map((partnership, index) => ({ partnership, index })).reverse().find(({ partnership }) => partnership.status === "active" && pair.every((id) => partnership.personIds.includes(id)))?.index;
-        if (existingIndex !== undefined) return current.map((partnership, index) => index === existingIndex ? { ...partnership, type: kind, startDate: startDate || partnership.startDate || "", startDatePrecision: startDatePrecision || partnership.startDatePrecision || "unknown", source: normalizeSourceValue(source) || partnership.source || "" } : partnership);
-        return [...current, { id: `partnership-${makeId()}`, personIds: pair, type: kind, status: "active", startDate: startDate || "", startDatePrecision: startDatePrecision || "unknown", endDate: "", endDatePrecision: "unknown", source: normalizeSourceValue(source) }];
-      });
-      setToast(kind === "marriage" ? "Брак добавлен" : "Партнёрство добавлено");
+      operation = { type: "upsert", relation: { id: `partnership-${makeId()}`, kind: "partnership", personIds: [selectedPerson.id, targetId], type: kind, status: "active", startDate: startDate || "", startDatePrecision: startDatePrecision || "unknown", endDate: "", endDatePrecision: "unknown", source: sourceValue } };
+      message = kind === "marriage" ? "Брак добавлен" : "Партнёрство добавлено";
     } else if (kind === "divorce") {
-      setPartnerships((current) => {
-        const index = [...current].map((partnership, itemIndex) => ({ partnership, itemIndex })).reverse().find(({ partnership }) => partnership.status === "active" && partnership.personIds.includes(selectedPerson.id) && partnership.personIds.includes(targetId))?.itemIndex;
-        if (index === undefined) return current;
-        return current.map((partnership, itemIndex) => itemIndex === index ? { ...partnership, status: "divorced", endDate: endDate || "", endDatePrecision: endDatePrecision || "unknown", source: normalizeSourceValue(source) || partnership.source || "" } : partnership);
-      });
-      setToast("Развод отмечен в истории семьи");
+      const existing = partnerships.find((partnership) => partnership.status === "active" && partnership.personIds.includes(selectedPerson.id) && partnership.personIds.includes(targetId));
+      if (!existing) return;
+      operation = { type: "update", relationId: existing.id, relation: { ...existing, status: "divorced", endDate: endDate || "", endDatePrecision: endDatePrecision || "unknown", source: sourceValue || existing.source || "" } };
+      message = "Развод отмечен в истории семьи";
+    } else return;
+    try {
+      const nextGraph = applyRelationOperation(people, partnerships, operation);
+      setPeople(nextGraph.people);
+      setPartnerships(nextGraph.partnerships);
+    } catch (error) {
+      setToast(explainUserError(error, { action: "Не удалось изменить связь", next: "проверьте участников и повторите" }));
+      return;
     }
+    setToast(message);
     setDirty(true);
     setRelationshipEditing(false);
   };
