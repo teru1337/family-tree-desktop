@@ -31,6 +31,14 @@ test("keeps a partnership label inside the enlarged gap between cards", () => {
   assert.equal(intersects(rect(label), { left: 238, right: 428, top: 0, bottom: 92 }, 2), false);
 });
 
+test("reserves an upper lane for a full partnership label", () => {
+  const cards = [{ left: 0, top: 180, width: 190, height: 92 }, { left: 238, top: 180, width: 190, height: 92 }];
+  const [label] = layoutConnectionLabels([{ id: "marriage", short: "Брак", full: "Брак: Александр Михайлович — Эвелина Владимировна Каноныхина", left: 214, top: 180, orientation: "horizontal", aboveCards: true }], { positions: cards });
+  assert.ok(label.expandedWidth > label.width);
+  assert.ok(label.expandedHeight > label.height);
+  assert.equal(label.top + label.expandedHeight / 2 < 180, true);
+});
+
 test("retains full label text while bounding the short canvas label", () => {
   const [label] = layoutConnectionLabels([{ id: "adoption", short: "Усыновление", full: "Биологический родитель — усыновитель", left: 95, top: 166, orientation: "vertical" }]);
   assert.equal(label.full, "Биологический родитель — усыновитель");

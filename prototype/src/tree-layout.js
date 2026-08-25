@@ -179,7 +179,8 @@ export function buildTreeLayout(people, partnerships = [], options = {}) {
       placedGroups.set(block.groupId, placed);
       return placed;
     });
-    return { index: generation.index, members: generation.members, blocks: placedBlocks };
+    const generationTop = placedBlocks[0]?.top ?? (top + generation.index * rowStep);
+    return { index: generation.index, members: generation.members, blocks: placedBlocks, top: generationTop };
   });
 
   return {
@@ -196,4 +197,25 @@ export function buildTreeLayout(people, partnerships = [], options = {}) {
     columnStep: cardWidth + blockGap,
     rowStep,
   };
+}
+
+export function withExpandedPartnershipClearance(layout, partnerships = [], expandedLabelId = "", clearance = 48) {
+  if (!layout || !expandedLabelId || !Array.isArray(partnerships)) return layout;
+  const partnershipId = String(expandedLabelId).replace(/^partnership-/, "");
+  const partnership = partnerships.find((item) => String(item?.id) === partnershipId);
+  const firstPosition = partnership?.personIds?.[0] ? layout.positions?.[partnership.personIds[0]] : null;
+  const secondPosition = partnership?.personIds?.[1] ? layout.positions?.[partnership.personIds[1]] : null;
+  const generation = Math.min(Number(firstPosition?.generation), Number(secondPosition?.generation));
+  const safeClearance = Math.max(24, Number(clearance) || 48);
+  if (!Number.isFinite(generation)) return layout;
+
+  const positions = Object.fromEntries(Object.entries(layout.positions || {}).map(([id, position]) => [
+    id,
+    position.generation >= generation ? { ...position, top: position.top + safeClearance } : position,
+  ]));
+  const generations = (layout.generations || []).map((group) => {
+    const originalTop = Number.isFinite(group.top) ? group.top : layout.top + group.index * layout.rowStep;
+    return { ...group, top: group.index >= generation ? originalTop + safeClearance : originalTop };
+  });
+  return { ...layout, positions, generations, height: layout.height + safeClearance };
 }

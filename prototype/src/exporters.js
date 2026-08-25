@@ -140,7 +140,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
   const partnerLabelCandidates = partnerEdges.map(({ partnership, first, second }) => {
     const geometry = horizontalConnection(layout.positions[first.id], layout.positions[second.id], safeConnectionGap / 2);
     const short = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : partnership.type === "engagement" ? "Помолвка" : "Связь";
-    return { id: `partnership-${partnership.id}`, short, left: geometry.middleX, top: Math.min(geometry.startY, geometry.endY) - 8 * safeFontScale, orientation: "horizontal" };
+    return { id: `partnership-${partnership.id}`, short, full: `${short}: ${formatPersonName(first, true).join(" ")} — ${formatPersonName(second, true).join(" ")}`, left: geometry.middleX, top: Math.min(layout.positions[first.id].top, layout.positions[second.id].top), orientation: "horizontal", aboveCards: true, expandedMaxWidth: 250 };
   });
   const connectionLabels = layoutConnectionLabels([...parentLabelCandidates, ...partnerLabelCandidates], { positions: Object.values(layout.positions), labelGap: 8, channelGap: 24, fontScale: safeFontScale });
 
@@ -156,8 +156,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
 
   const labelMarkup = connectionLabels.map((label) => `<rect x="${label.left - label.width / 2}" y="${label.top - label.height / 2}" width="${label.width}" height="${label.height}" rx="4" fill="${theme.background}" fill-opacity="0.94" /><text x="${label.left}" y="${label.top + 4 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" font-weight="700" fill="${theme.label}">${escapeXml(label.short)}</text>`).join("");
 
-  const generationTop = (layout.top ?? 78) - 38;
-  const generationMarkup = layout.generations.map((group) => `<text x="24" y="${generationTop + group.index * (layout.rowStep ?? 190)}" font-family="Segoe UI, Arial, sans-serif" font-size="${12 * safeFontScale}" font-weight="600" letter-spacing="0.8" fill="${theme.label}">ПОКОЛЕНИЕ ${group.index + 1}</text>`).join("");
+  const generationMarkup = layout.generations.map((group) => `<text x="24" y="${(group.top ?? ((layout.top ?? 78) + group.index * (layout.rowStep ?? 190))) - 38}" font-family="Segoe UI, Arial, sans-serif" font-size="${12 * safeFontScale}" font-weight="600" letter-spacing="0.8" fill="${theme.label}">ПОКОЛЕНИЕ ${group.index + 1}</text>`).join("");
   const nodeMarkup = people.map((person) => {
     const position = layout.positions[person.id];
     if (!position) return "";

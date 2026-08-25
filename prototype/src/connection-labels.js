@@ -24,12 +24,15 @@ function overlapArea(first, second, gap = 0) {
   return width * height;
 }
 
-export function estimateConnectionLabel(text, { fontScale = 1 } = {}) {
+export function estimateConnectionLabel(text, { fontScale = 1, maxWidth = 220 } = {}) {
   const scale = Math.max(0.8, Number(fontScale) || 1);
   const value = safeText(text);
+  const widthLimit = Math.max(42, Number(maxWidth) || 220);
+  const naturalWidth = Math.max(42, Math.ceil(value.length * 6.35 * scale + 12));
+  const lines = Math.max(1, Math.ceil(naturalWidth / widthLimit));
   return {
-    width: Math.min(220, Math.max(42, Math.ceil(value.length * 6.35 * scale + 12))),
-    height: Math.ceil(19 * scale),
+    width: Math.min(widthLimit, naturalWidth),
+    height: Math.ceil((19 + Math.max(0, lines - 1) * 14) * scale),
   };
 }
 
@@ -47,21 +50,33 @@ export function layoutConnectionLabels(candidates = [], { positions = [], labelG
 
   return ordered.map((candidate) => {
     const size = estimateConnectionLabel(candidate.short, { fontScale });
+    const expandedSize = estimateConnectionLabel(candidate.full || candidate.short, { fontScale, maxWidth: candidate.expandedMaxWidth || 250 });
+    const laneHeight = Math.max(size.height, expandedSize.height);
     const orientation = candidate.orientation === "horizontal" ? "horizontal" : "vertical";
     const offsets = candidateOffsets(maxLanes);
     let selected = null;
     let best = null;
     offsets.forEach((offset) => {
       const left = Number(candidate.left) + (orientation === "vertical" ? offset * channelGap : 0);
-      const top = Number(candidate.top) + (orientation === "horizontal" ? offset * channelGap : 0);
-      const rect = labelRect(left, top, size.width, size.height);
+      const baseTop = candidate.aboveCards ? Number(candidate.top) - laneHeight / 2 - (Number(candidate.cardGap) || labelGap) : Number(candidate.top);
+      const top = baseTop + (orientation === "horizontal" ? offset * channelGap : 0);
+      const rect = labelRect(left, top, expandedSize.width, laneHeight);
       const cardPenalty = cards.reduce((total, card) => total + overlapArea(rect, card, 3), 0);
       const labelPenalty = occupied.reduce((total, other) => total + overlapArea(rect, other, labelGap), 0);
       const score = cardPenalty * 1000 + labelPenalty;
       if (!best || score < best.score) best = { left, top, rect, score };
       if (!selected && cardPenalty === 0 && labelPenalty === 0) selected = { left, top, rect };
     });
-    const result = { ...candidate, left: selected?.left ?? best.left, top: selected?.top ?? best.top, width: size.width, height: size.height };
+    const result = {
+      ...candidate,
+      left: selected?.left ?? best.left,
+      top: selected?.top ?? best.top,
+      width: size.width,
+      height: size.height,
+      expandedWidth: expandedSize.width,
+      expandedHeight: expandedSize.height,
+      laneHeight,
+    };
     occupied.push(selected?.rect ?? best.rect);
     return result;
   });
