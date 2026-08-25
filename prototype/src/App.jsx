@@ -1207,7 +1207,7 @@ function MainMenuBackground() {
   );
 }
 
-function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }) {
+function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose, safeMode = false }) {
   const [closing, setClosing] = useState(false);
   const [animationActive, setAnimationActive] = useState(true);
   useEffect(() => {
@@ -1226,6 +1226,7 @@ function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose }
       <section className="main-menu-card" role="dialog" aria-modal="true" aria-labelledby="main-menu-title" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="icon-button main-menu-close" onClick={requestClose} aria-label="Закрыть главное меню"><X size={21} /></button>
         <div className="main-menu-brand"><BrandMark className="menu-logo" /><div><h1 id="main-menu-title">Семейное древо</h1><p>Храните историю семьи на своём компьютере.</p></div></div>
+        {safeMode && <p className="main-menu-runtime-status" role="status">Безопасный режим: используется программный рендеринг.</p>}
         <div className="main-menu-list">
           <button type="button" className="main-menu-action main-menu-action-primary" onClick={onCreate}><Plus size={21} weight="bold" /><span><strong>Создать древо</strong><small>Начать новый семейный проект</small></span><CaretRight size={18} /></button>
           <button type="button" className="main-menu-action" onClick={onLoad}><FolderOpen size={21} /><span><strong>Загрузить древо</strong><small>Открыть сохранённый файл проекта</small></span><CaretRight size={18} /></button>
@@ -1547,6 +1548,7 @@ export function App() {
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [returnToMenuAfterModal, setReturnToMenuAfterModal] = useState("");
   const [updateStatus, setUpdateStatus] = useState(null);
+  const [runtimeStatus, setRuntimeStatus] = useState({ safeMode: false });
   const [updateOpen, setUpdateOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [qualityReport, setQualityReport] = useState({ valid: true, errors: [], warnings: [] });
@@ -1713,6 +1715,15 @@ export function App() {
       if (status.state === "error") setToast(explainUserError(status.error || status.message, { action: "Не удалось проверить обновления", next: "проверьте интернет-соединение и повторите позже" }));
     });
     return unsubscribe;
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const getRuntimeStatus = window.familyTreeDesktop?.getRuntimeStatus;
+    if (!getRuntimeStatus) return undefined;
+    getRuntimeStatus().then((status) => {
+      if (active && status?.safeMode) setRuntimeStatus({ safeMode: true });
+    }).catch(() => {});
+    return () => { active = false; };
   }, []);
   useEffect(() => {
     if (!dirty || !autoSaveEnabled) return undefined;
@@ -2485,7 +2496,7 @@ export function App() {
            {editing ? <PersonEditor key={editorSessionKey} draft={draft} isNew={!draft?.id} relationshipMode={relationshipMode} relationshipType={relationshipType} partnershipType={partnershipType} connectionTargetId={connectionTargetId} relationshipSource={relationshipSource} unknownParent={unknownParent} singleKnownParent={singleKnownParent} outOfMarriage={outOfMarriage} siblingWithoutParents={siblingWithoutParents} people={people} onChange={setDraft} onRelationChange={setRelationshipMode} onRelationshipTypeChange={setRelationshipType} onPartnershipTypeChange={setPartnershipType} onConnectionTargetChange={setConnectionTargetId} onRelationshipSourceChange={setRelationshipSource} onUnknownParentChange={setUnknownParent} onSingleKnownParentChange={setSingleKnownParent} onOutOfMarriageChange={setOutOfMarriage} onSiblingWithoutParentsChange={setSiblingWithoutParents} onSave={savePerson} onCancel={() => { setEditing(false); setDraft(null); setRelationshipMode(""); setRelationshipType("biological"); setPartnershipType("marriage"); setConnectionTargetId(""); setRelationshipSource(""); setUnknownParent(false); setSingleKnownParent(false); setOutOfMarriage(false); setSiblingWithoutParents(false); }} /> : relationshipEditing ? <RelationshipEditor person={selectedPerson} people={people} partnerships={partnerships} initialKind={relationshipInitialKind} onSave={saveRelationship} onDeleteRelationship={requestDeleteRelationship} onCancel={() => { setRelationshipEditing(false); setRelationshipInitialKind("parent"); }} /> : <PersonDetail person={selectedPerson} people={people} partnerships={partnerships} onEdit={() => openEditor(selectedPerson)} onSelect={selectPerson} onAddRelative={(relation) => openEditor(null, relation)} onManageRelationships={(kind = "parent") => { setInspectorOpen(true); setRelationshipInitialKind(kind); setRelationshipEditing(true); }} onSaveBasicSection={saveBasicSection} onSaveTimelineSection={saveTimelineSection} onSaveFactSourcesSection={saveFactSourcesSection} onCalculateRelationship={openRelationshipCalculator} onShowOnMap={focusPersonOnMap} onDelete={() => requestDelete(selectedPerson?.id)} onMoveSiblingOrder={moveSiblingOrder} onPreviousPerson={() => navigatePersonHistory(-1)} onNextPerson={() => navigatePersonHistory(1)} canGoPrevious={canMovePersonNavigation(personNavigation, -1)} canGoNext={canMovePersonNavigation(personNavigation, 1)} />}
          </aside>
        </main>
-       <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span><span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
+       <footer className="app-footer"><span className="footer-info"><Info size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {treeLayout.generations.length}</span><span className="footer-file" title={projectMeta.filePath || `Имя файла: ${projectMeta.fileName || "семейное-древо.familytree"}`}>Файл: {projectMeta.fileName || "семейное-древо.familytree"}</span>{runtimeStatus.safeMode && <span className="footer-safe-mode" title="Аппаратное ускорение отключено, используется программный рендеринг">Безопасный режим</span>}<span className={`footer-save ${dirty ? "footer-save-dirty" : ""}`}><CheckCircle size={19} weight="fill" /> {dirty ? "Есть несохранённые изменения" : lastSavedAt ? `Последнее сохранение: ${formatDateTime(lastSavedAt)}` : "Проект ещё не сохранён"}</span><span className="footer-backup">Автосохранение: {autoSaveEnabled ? (lastBackupAt ? formatDateTime(lastBackupAt) : "включено") : "выключено"}</span></footer>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".familytree,.json,application/json" onChange={handleFileSelected} />
        {toast && <div className="toast" role="status" aria-live="polite"><CheckCircle size={19} weight="fill" /> <span>{toast}</span>{toastAction?.message === toast && <button type="button" className="toast-action" onClick={() => { setToastAction(null); toastAction.onClick(); }}>{toastAction.label}</button>}</div>}
        {backupOpen && <BackupModal backups={backups} projectMeta={projectMeta} lastSavedAt={lastSavedAt} lastBackupAt={lastBackupAt} onClose={() => setBackupOpen(false)} onRestore={restoreBackup} onDownload={downloadBackup} />}
@@ -2499,7 +2510,7 @@ export function App() {
        {relationshipDeleteConfirm && <ConfirmModal title="Удалить связь?" description={`${relationshipDeleteConfirm.label}. Связь будет убрана из дерева, а перед этим будет создана резервная копия. После удаления можно сразу отменить действие.`} confirmLabel="Удалить связь" onClose={() => setRelationshipDeleteConfirm(null)} onConfirm={deleteRelationship} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}
        {pendingUnsavedAction && <UnsavedChangesModal onSave={() => continueAfterUnsavedChoice(true)} onDiscard={() => continueAfterUnsavedChoice(false)} onCancel={() => setPendingUnsavedAction(null)} />}
-       {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} />}
+       {mainMenuOpen && <MainMenuModal onCreate={() => createNewTree(true)} onLoad={openProject} onSettings={() => openSettings(true)} onHelp={() => openInstruction(true)} onExit={exitApplication} onClose={() => setMainMenuOpen(false)} safeMode={runtimeStatus.safeMode} />}
        {qualityOpen && <DataQualityModal report={qualityReport} peopleCount={people.length} onClose={() => setQualityOpen(false)} />}
        {changeLogOpen && <Suspense fallback={null}><ChangeLogModal entries={projectMeta.changeLog} onClose={() => setChangeLogOpen(false)} /></Suspense>}
        {updateStatus && updateOpen && ["available", "downloading", "downloaded"].includes(updateStatus.state) && <UpdateModal status={updateStatus} onClose={() => setUpdateOpen(false)} onDownload={downloadUpdate} onInstall={installUpdate} onOpenReleases={openReleasesPage} />}

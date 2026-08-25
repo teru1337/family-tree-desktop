@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("familyTreeDesktop", {
   close: () => ipcRenderer.send("family-tree-close"),
   getVersion: () => ipcRenderer.invoke("family-tree-version"),
+  getRuntimeStatus: () => ipcRenderer.invoke("family-tree-runtime-status"),
   checkForUpdates: () => ipcRenderer.invoke("family-tree-update-check"),
   openProjectFile: () => ipcRenderer.invoke("family-tree-open-project-file"),
   saveProjectFile: (payload, suggestedName, filePath = "", kind = "project") => ipcRenderer.invoke("family-tree-save-project-file", { payload, suggestedName, filePath, kind }),

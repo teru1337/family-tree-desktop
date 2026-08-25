@@ -14,6 +14,15 @@ let currentUpdateVersion = "";
 let downloadedUpdateVersion = "";
 let updateCheckPromise = null;
 let updateDownloadPromise = null;
+const safeModeRequested = process.argv.some((argument) => ["--safe-mode", "--software-rendering"].includes(argument)) || process.env.FAMILY_TREE_SOFTWARE_RENDERING === "1";
+if (safeModeRequested) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("in-process-gpu");
+  app.commandLine.appendSwitch("use-gl", "swiftshader");
+  app.commandLine.appendSwitch("use-angle", "swiftshader");
+}
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -239,9 +248,11 @@ function createWindow(port) {
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.on("closed", () => { mainWindow = null; });
   mainWindow.webContents.once("did-finish-load", () => {
+    if (safeModeRequested && !mainWindow.isVisible()) mainWindow.show();
     if (app.isPackaged) setTimeout(() => checkForUpdates(), 1200);
   });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  if (safeModeRequested) mainWindow.show();
 }
 
 if (process.platform === "win32") app.setAppUserModelId(APP_ID);
@@ -269,6 +280,7 @@ if (!hasSingleInstance) {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
   ipcMain.handle("family-tree-version", () => app.getVersion());
+  ipcMain.handle("family-tree-runtime-status", () => ({ safeMode: safeModeRequested }));
   ipcMain.handle("family-tree-open-project-file", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Открыть семейное древо",
