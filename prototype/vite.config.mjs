@@ -12,6 +12,7 @@ export default defineConfig({
           dates: ["./src/dates.js"],
           timeline: ["./src/timeline.js"],
           "sibling-order": ["./src/sibling-order.js"],
+          "family-view": ["./src/family-view.js"],
         },
       },
     },
