@@ -1,4 +1,5 @@
 import { inferDatePrecision, validateDateRecord } from "./dates.js";
+import { validateNameParts, validateSurnameHistory } from "./person-names.js";
 import { validateFactSources, validateTimelineEvents } from "./timeline.js";
 
 const personNamePattern = /^[\p{L}\s.'’\-–—()]+$/u;
@@ -19,6 +20,10 @@ function dateRecordFromDraft(draft) {
 
 export function validateBasicPersonSection(draft) {
   const errors = {};
+  const namePartsError = validateNameParts(draft?.nameParts);
+  if (namePartsError) errors[namePartsError.field] = namePartsError.error;
+  const surnameHistoryError = validateSurnameHistory(draft?.surnameHistory || []);
+  if (surnameHistoryError) errors.surnameHistory = surnameHistoryError;
   const name = String(draft?.name || "").trim();
   const maidenName = String(draft?.maidenName || "").trim();
   const place = String(draft?.place || "").trim();

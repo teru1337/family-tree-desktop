@@ -287,3 +287,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .wizard-first-person-note { display: grid; gap: 4px; margin-top: -2px; padding: 11px 12px; border: 1px solid #d9e3d1; border-radius: 7px; background: #f7fbf4; color: #4e5947; }
 .wizard-first-person-note strong { font-size: 12px; }
 .wizard-first-person-note small { color: #858178; font-size: 11px; line-height: 1.35; }
+.field-group { display: grid; gap: 9px; min-width: 0; }
+.field-group-heading { display: grid; gap: 4px; color: #605c55; font-size: 12px; font-weight: 650; }
+.field-group-heading em { color: #a4a097; font-size: 11px; font-style: normal; float: right; font-weight: 400; }
+.field-group-heading small { color: #969188; font-size: 11px; font-weight: 400; line-height: 1.35; }
+.name-fields-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.name-suggestion-hint { padding: 8px 10px; border: 1px dashed #d6c8b7; border-radius: 6px; background: #fffaf2; }
+.surname-history-list { display: grid; gap: 8px; }
+.surname-history-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, .9fr) minmax(0, 1.1fr) minmax(0, 1.2fr) 32px; gap: 6px; align-items: center; }
+.surname-history-row input, .surname-history-row select { min-width: 0; width: 100%; height: 36px; padding: 8px 9px; border: 1px solid #dcd9d1; border-radius: 6px; background: #fffefa; color: #393631; font-size: 12px; }
+.surname-history-row input:focus, .surname-history-row select:focus { border-color: var(--blue); outline: 0; box-shadow: 0 0 0 3px rgba(62, 136, 190, 0.11); }
+.surname-history-row .date-range-inputs input { height: 36px; }
+.surname-history-editor.has-error .surname-history-row input, .surname-history-editor.has-error .surname-history-row select { border-color: #c98585; }
+@media (max-width: 430px) { .name-fields-grid { grid-template-columns: 1fr; }.surname-history-row { grid-template-columns: 1fr 32px; }.surname-history-row .date-range-inputs { grid-column: auto; }.surname-history-row select, .surname-history-row input:nth-of-type(4), .surname-history-row input:nth-of-type(5) { grid-column: 1 / -1; } }

@@ -1,6 +1,7 @@
 import { normalizePersonDate, validateDateRecord } from "./dates.js";
 import { inspectFamilyData } from "./data-quality.js";
 import { normalizeCustomFields } from "./person-fields.js";
+import { normalizePersonNames } from "./person-names.js";
 import { normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents } from "./timeline.js";
 
 export const PROJECT_FORMAT = "familytree";
@@ -38,7 +39,7 @@ function normalizePersonMetadata(person) {
   const rawSiblingOrder = person?.siblingOrder;
   const siblingOrderNumber = rawSiblingOrder === "" || rawSiblingOrder === null || rawSiblingOrder === undefined ? null : Number(rawSiblingOrder);
   return {
-    ...person,
+    ...normalizePersonNames(person),
     isUnknown: person?.isUnknown === true,
     source: typeof person?.source === "string" ? person.source.trim() : "",
     confidence: PERSON_CONFIDENCE_LEVELS.includes(person?.confidence) ? person.confidence : "unknown",
@@ -435,6 +436,9 @@ export function validateProject(raw) {
     if (person?.customFields !== undefined && !Array.isArray(person.customFields)) warnings.push(`Дополнительные поля записи ${personId} указаны не списком и будут сброшены.`);
     if (person?.factSources !== undefined && (!person.factSources || typeof person.factSources !== "object" || Array.isArray(person.factSources))) warnings.push(`Источники отдельных сведений записи ${personId} указаны неправильно и будут сброшены.`);
     if (person?.timelineEvents !== undefined && !Array.isArray(person.timelineEvents)) warnings.push(`Временная шкала записи ${personId} указана не списком и будет сброшена.`);
+    if (person?.nameParts !== undefined && (!person.nameParts || typeof person.nameParts !== "object" || Array.isArray(person.nameParts))) warnings.push(`Части ФИО записи ${personId} указаны неправильно и будут восстановлены из совместимого имени.`);
+    if (person?.surnameHistory !== undefined && !Array.isArray(person.surnameHistory)) warnings.push(`История фамилии записи ${personId} указана не списком и будет сброшена.`);
+    if (person?.nameOrigin !== undefined && (!person.nameOrigin || typeof person.nameOrigin !== "object" || Array.isArray(person.nameOrigin))) warnings.push(`Происхождение ФИО записи ${personId} указано неправильно и будет заменено безопасным значением.`);
     if (person?.siblingOrder !== undefined && person?.siblingOrder !== null && person?.siblingOrder !== "") {
       const siblingOrder = Number(person.siblingOrder);
       if (!Number.isInteger(siblingOrder) || siblingOrder < 1 || siblingOrder > 999) warnings.push(`Порядок записи ${personId} среди братьев и сестёр указан неправильно и будет сброшен.`);

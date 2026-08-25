@@ -63,9 +63,11 @@ import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_P
 import { buildTreeLayout } from "./tree-layout.js";
 import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
 import { applyRelationOperation, normalizeRelationState } from "./relation-operations.js";
+import { applySuggestedChildSurname, formerSurnames, formatPersonName, normalizeNameParts, normalizePersonNames, normalizeSurnameHistory, surnameSuggestionsForChild } from "./person-names.js";
 import { validateBasicPersonSection, validateFactSourcesSection, validateTimelineSection } from "./section-validation.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
+const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
 
 const BRAND_MARK_SRC = "/branding/family-circle.svg";
 
@@ -75,8 +77,8 @@ function BrandMark({ className = "" }) {
 
 const initialPeople = [];
 
-const blankPerson = { id: "", name: "", shortName: "", isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
-const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
+const blankPerson = { id: "", name: "", shortName: "", nameParts: normalizeNameParts(), nameOrigin: { status: "unknown", source: "", personIds: [] }, surnameHistory: [], isUnknown: false, source: "", confidence: "unknown", siblingOrder: null, customFields: [], factSources: {}, timelineEvents: [], year: "", datePrecision: "exact", birthDateFrom: "", birthDateTo: "", birthDate: { precision: "unknown", text: "", value: "", from: "", to: "" }, place: "", image: "", gender: "", parentIds: [], parentLinks: [], partnerIds: [], childIds: [], siblingIds: [], siblingLinks: [], occupation: "", biography: "", maidenName: "", familyContext: [] };
+const defaultProjectSettings = { autoSave: true, treeStyle: "classic", showPhotos: true, showFormerSurnames: true, largeText: false, cardFields: [...DEFAULT_CARD_FIELDS] };
 
 const initialPartnerships = [];
 
@@ -87,10 +89,7 @@ const partnershipTypeLabel = { marriage: "Брак", engagement: "Помолвк
 const confidenceLabel = { unknown: "Не указана", low: "Низкая", medium: "Средняя", high: "Высокая" };
 const familyContextLabel = { "single-known-parent": "Один известный родитель", "out-of-marriage": "Ребёнок вне брака", "sibling-without-parents": "Родители не указаны" };
 
-function personDisplayName(person) {
-  if (person?.isUnknown) return "Неизвестный человек";
-  return person?.name || "Человек без имени";
-}
+function personDisplayName(person) { return formatPersonName(person); }
 
 function familyContextText(person) {
   return (Array.isArray(person?.familyContext) ? person.familyContext : []).map((value) => familyContextLabel[value]).filter(Boolean).join(" · ");
@@ -229,13 +228,14 @@ function PersonAvatar({ person, large = false, showPhoto = true }) {
   return showPhoto && person?.image ? <img className={`person-avatar ${large ? "person-avatar-large" : ""}`} src={person.image} alt="" /> : <span className={`person-avatar person-avatar-empty ${large ? "person-avatar-large" : ""}`}><User size={large ? 32 : 20} weight="regular" /></span>;
 }
 
-function TreeNode({ person, position, selected, onSelect, showPhotos, cardFields, dragging, onDragStart, onDragMove, onDragEnd }) {
+function TreeNode({ person, position, selected, onSelect, showPhotos, showFormerSurnames, cardFields, dragging, onDragStart, onDragMove, onDragEnd }) {
   const cardLines = formatCardFieldLines(person, cardFields);
+  const cardName = formatPersonName(person, { showFormerSurnames });
   return (
-    <button className={`tree-node ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${personDisplayName(person)}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
+    <button className={`tree-node ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""}`} style={{ left: position.left, top: position.top }} type="button" onClick={() => onSelect(person.id)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-label={`${cardName}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
       <PersonAvatar person={person} showPhoto={showPhotos} />
       <span className="tree-node-copy">
-        {(person.isUnknown ? personDisplayName(person) : (person.shortName || person.name || personDisplayName(person))).split("\n").map((line) => <span key={line} className="tree-node-name">{line}</span>)}
+        {cardName.split("\n").map((line) => <span key={line} className="tree-node-name">{line}</span>)}
         <span className="tree-node-details">{cardLines.map((line, index) => <span key={`${person.id}-card-line-${index}`} className={index === 0 && sanitizeCardFields(cardFields).includes("year") ? "tree-node-year" : "tree-node-detail"}>{line}</span>)}</span>
       </span>
     </button>
@@ -298,8 +298,7 @@ function BasicPersonSectionEditor({ person, onSave, onCancel }) {
   };
   return <div className="editor-content section-editor"><div className="editor-intro"><div className="relation-editor-icon"><PencilSimple size={30} /></div><div><span className="eyebrow">Раздел человека</span><h2>Основная информация</h2><p>Проверьте только этот раздел. Остальные сведения останутся без изменений.</p></div></div><div className="form-grid section-form-grid">
     <label className="unknown-person-toggle field-full"><input type="checkbox" checked={Boolean(draft.isUnknown)} onChange={(event) => update("isUnknown", event.target.checked)} /><span><strong>Неизвестный человек</strong><small>ФИО можно оставить пустым, если имя пока неизвестно.</small></span></label>
-    <label className={`field field-full ${errors.name ? "has-error" : ""}`}><span>ФИО <em>необязательно</em></span><input autoFocus value={draft.name || ""} onChange={(event) => update("name", event.target.value)} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
-    <label className={`field ${errors.maidenName ? "has-error" : ""}`}><span>Девичья фамилия <em>необязательно</em></span><input value={draft.maidenName || ""} onChange={(event) => update("maidenName", event.target.value)} aria-invalid={Boolean(errors.maidenName)} />{errors.maidenName && <small className="field-error">{errors.maidenName}</small>}</label>
+    <Suspense fallback={null}><NameEditorFields draft={draft} onChange={setDraft} errors={errors} /><NameEditorFields kind="history" value={draft.surnameHistory} error={errors.surnameHistory} onChange={(value) => update("surnameHistory", value)} /></Suspense>
     <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
     <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year || ""} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
     <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => setDraft((current) => ({ ...current, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }))}>Неизвестно</button></div></div>
@@ -403,7 +402,7 @@ function PersonDetail({ person, people, partnerships, onEdit, onSelect, onAddRel
   return (
     <div className="detail-content">
       <div className="profile-block"><PersonAvatar person={person} large /><div className="profile-summary"><h2>{displayName}</h2><p className="profile-year">{person.year || "Дата рождения неизвестна"}</p><div className="profile-place"><MapPin size={17} /> {person.place || "Место рождения не указано"}</div></div><div className="profile-actions"><div className="person-navigation-actions"><button type="button" className="button button-secondary person-nav-button" onClick={onPreviousPerson} disabled={!canGoPrevious}><CaretLeft size={17} /> Предыдущий</button><button type="button" className="button button-secondary person-nav-button" onClick={onNextPerson} disabled={!canGoNext}>Следующий <CaretRight size={17} /></button></div><button type="button" className="button button-secondary map-focus-button" onClick={() => onShowOnMap(person.id)}><Crosshair size={18} /> Показать найденного человека на карте</button><button type="button" className="button button-primary edit-button" onClick={onEdit}><PencilSimple size={18} weight="bold" /> Редактировать</button></div></div>
-      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><SectionEditButton label="Основная информация" onClick={() => setEditingSection("basic")} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Девичья фамилия</dt><dd>{person.maidenName || "—"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
+      <section className="detail-section"><div className="section-title-row"><h3>Основная информация</h3><SectionEditButton label="Основная информация" onClick={() => setEditingSection("basic")} /></div><dl className="facts-list"><div><dt>Дата рождения</dt><dd>{person.year || "—"}</dd></div><div><dt>Место рождения</dt><dd>{person.place || "—"}</dd></div><div><dt>Семейный статус</dt><dd>{familyStatusLabel(relatedPartnerships)}</dd></div><div><dt>Семейная ситуация</dt><dd>{familyContextText(person) || "—"}</dd></div><div><dt>Профессия</dt><dd>{person.occupation || "—"}</dd></div><div><dt>Текущая фамилия</dt><dd>{person.nameParts?.familyName || "—"}</dd></div><div><dt>Прежние фамилии</dt><dd>{formerSurnames(person).join(", ") || "—"}</dd></div><div><dt>Происхождение ФИО</dt><dd>{person.nameOrigin?.status === "suggested" ? "Предложено по родителям" : person.nameOrigin?.status === "inferred" ? "Выведено из старой записи" : "Введено пользователем"}</dd></div><div><dt>Тип записи</dt><dd>{person.isUnknown ? "Неизвестный человек" : "Обычная запись"}</dd></div><div><dt>Источник сведений</dt><dd>{person.source || "—"}</dd></div><div><dt>Достоверность</dt><dd>{confidenceLabel[person.confidence] || confidenceLabel.unknown}</dd></div><div><dt>Примечание</dt><dd>{person.biography || "—"}</dd></div></dl></section>
       <FactSourcesSection person={person} onEdit={() => setEditingSection("sources")} />
       <TimelineSection person={person} onEdit={() => setEditingSection("timeline")} />
       <RelationSection title="Родители" items={parents} onSelect={onSelect} onEdit={() => onManageRelationships("parent")} emptyText="Родители ещё не добавлены" />
@@ -515,12 +514,14 @@ function CustomFieldsEditor({ fields, error, onChange }) {
   </div>;
 }
 
-function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partnershipType, connectionTargetId, relationshipSource, unknownParent, singleKnownParent, outOfMarriage, siblingWithoutParents, people, onChange, onRelationChange, onRelationshipTypeChange, onPartnershipTypeChange, onConnectionTargetChange, onRelationshipSourceChange, onUnknownParentChange, onSingleKnownParentChange, onOutOfMarriageChange, onSiblingWithoutParentsChange, onSave, onCancel }) {
+function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partnershipType, connectionTargetId, relationshipSource, unknownParent, singleKnownParent, outOfMarriage, siblingWithoutParents, people, partnerships, onChange, onRelationChange, onRelationshipTypeChange, onPartnershipTypeChange, onConnectionTargetChange, onRelationshipSourceChange, onUnknownParentChange, onSingleKnownParentChange, onOutOfMarriageChange, onSiblingWithoutParentsChange, onSave, onCancel }) {
   const [errors, setErrors] = useState({});
   const [wizardStep, setWizardStep] = useState(isNew ? 1 : 2);
   const photoInputRef = useRef(null);
   const targetOptions = people.filter((person) => person.id !== draft.id);
   const firstPerson = isNew && targetOptions.length === 0;
+  const surnameSuggestions = useMemo(() => relationshipMode === "child" && connectionTargetId ? surnameSuggestionsForChild({ people, partnerships, parentId: connectionTargetId }) : [], [people, partnerships, relationshipMode, connectionTargetId]);
+  const surnameSuggestion = surnameSuggestions[0] || null;
   useEffect(() => { setWizardStep(isNew ? 1 : 2); setErrors({}); }, [isNew, draft?.id]);
   const update = (field, value) => {
     onChange({ ...draft, [field]: value });
@@ -558,6 +559,10 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
     onOutOfMarriageChange(false);
     onSiblingWithoutParentsChange(false);
   }, [firstPerson, relationshipMode]);
+  useEffect(() => {
+    if (!isNew || relationshipMode !== "child" || !connectionTargetId || draft?.nameOrigin?.status === "manual") return;
+    if (surnameSuggestion?.surname) onChange(applySuggestedChildSurname(draft, surnameSuggestion));
+  }, [isNew, relationshipMode, connectionTargetId, surnameSuggestion?.surname]);
   const changeConnectionTarget = (value) => {
     onConnectionTargetChange(value);
     setErrors((current) => ({ ...current, connectionTargetId: "" }));
@@ -625,8 +630,7 @@ function PersonEditor({ draft, isNew, relationshipMode, relationshipType, partne
         {isNew && wizardStep === 1 && relationshipMode && <label className="field field-full relationship-source-field"><span>Источник связи <em>необязательно</em></span><input value={relationshipSource || ""} maxLength={MAX_EVENT_SOURCE} onChange={(event) => onRelationshipSourceChange(event.target.value)} placeholder="Например, семейный архив" />{errors.relationshipSource && <small className="field-error">{errors.relationshipSource}</small>}</label>}
         {(!isNew || wizardStep === 2) && <>
         <label className="unknown-person-toggle"><input type="checkbox" checked={displayUnknown} disabled={unknownParent} onChange={(event) => update("isUnknown", event.target.checked)} /><span><strong>{unknownParent ? "Неизвестный родитель" : "Неизвестный человек"}</strong><small>{unknownParent ? "ФИО можно оставить пустым: запись уже будет связана с выбранным человеком." : "Оставьте ФИО пустым, если нужно создать связь без имени."}</small></span></label>
-        <label className={`field field-full ${errors.name ? "has-error" : ""}`}><span>ФИО <em>необязательно</em></span><input autoFocus value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder={displayUnknown ? "Можно оставить пустым" : "Например, Иван Петров"} aria-invalid={Boolean(errors.name)} />{errors.name && <small className="field-error">{errors.name}</small>}</label>
-        <label className={`field ${errors.maidenName ? "has-error" : ""}`}><span>Девичья фамилия <em>необязательно</em></span><input value={draft.maidenName} onChange={(event) => update("maidenName", event.target.value)} placeholder="Не указано" aria-invalid={Boolean(errors.maidenName)} /></label>
+        <Suspense fallback={null}><NameEditorFields draft={draft} onChange={onChange} errors={errors} suggestion={isNew && relationshipMode === "child" ? surnameSuggestion : null} /><NameEditorFields kind="history" value={draft.surnameHistory} error={errors.surnameHistory} onChange={(value) => update("surnameHistory", value)} /></Suspense>
         <label className="field"><span>Пол <em>необязательно</em></span><select value={draft.gender || ""} onChange={(event) => update("gender", event.target.value)}><option value="">Не указан</option><option value="male">Мужчина</option><option value="female">Женщина</option></select></label>
         <div className={`field field-full ${errors.year ? "has-error" : ""}`}><span>Дата рождения <em>необязательно</em></span>{precision === "range" ? <div className="date-range-inputs"><input value={draft.birthDateFrom || ""} onChange={(event) => update("birthDateFrom", event.target.value)} placeholder="Начало, например 1940" aria-invalid={Boolean(errors.year)} /><span>—</span><input value={draft.birthDateTo || ""} onChange={(event) => update("birthDateTo", event.target.value)} placeholder="Конец, например 1945" aria-invalid={Boolean(errors.year)} /></div> : <input value={draft.year} onChange={(event) => update("year", event.target.value)} placeholder={precision === "exact" ? "Например, 12.05.1926" : precision === "approximate" ? "Например, около 1926" : "Например, 1926"} aria-invalid={Boolean(errors.year)} />}{errors.year && <small className="field-error">{errors.year}</small>}</div>
         <div className="field field-full"><span>Точность даты</span><div className="date-options"><button type="button" className={`date-option ${precision === "exact" ? "selected" : ""}`} onClick={() => update("datePrecision", "exact")}>Точный день</button><button type="button" className={`date-option ${precision === "year" ? "selected" : ""}`} onClick={() => update("datePrecision", "year")}>Только год</button><button type="button" className={`date-option ${precision === "approximate" ? "selected" : ""}`} onClick={() => update("datePrecision", "approximate")}>Примерно</button><button type="button" className={`date-option ${precision === "range" ? "selected" : ""}`} onClick={() => update("datePrecision", "range")}>Диапазон</button><button type="button" className={`date-option ${precision === "unknown" ? "selected" : ""}`} onClick={() => { onChange({ ...draft, datePrecision: "unknown", year: "", birthDateFrom: "", birthDateTo: "" }); setErrors((current) => ({ ...current, year: "" })); }}>Неизвестно</button></div><small className="field-hint">Допустимо: 1926, 12.05.1926, «около 1926» или диапазон 1940–1945.</small></div>
@@ -714,7 +718,7 @@ function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewp
   return <div className="tree-minimap" aria-label="Мини-карта всего дерева"><div className="tree-minimap-title">Мини-карта</div><svg width={mapWidth} height={mapHeight} viewBox={`0 0 ${mapWidth} ${mapHeight}`} role="img" aria-label="Обзор дерева" onClick={navigate}><rect className="tree-minimap-board" x="0" y="0" width={mapWidth} height={mapHeight} rx="6" />{parentLines.map(({ parent, child }, index) => { const from = point(parent); const to = point(child); return <line key={`mini-parent-${index}`} className="tree-minimap-parent-line" x1={from.x + from.width / 2} y1={from.y + from.height} x2={to.x + to.width / 2} y2={to.y} />; })}{partnerLines.map(({ first, second }, index) => { const from = point(first); const to = point(second); return <line key={`mini-partner-${index}`} className="tree-minimap-partner-line" x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} />; })}{people.map((person) => { const position = positions[person.id]; if (!position) return null; const card = point(position); return <rect key={person.id} className="tree-minimap-person" x={card.x} y={card.y} width={Math.max(3, card.width)} height={Math.max(3, card.height)} rx="1.5" />; })}<rect className="tree-minimap-viewport" x={padding + visibleBoard.x * scale} y={padding + visibleBoard.y * scale} width={Math.max(4, visibleBoard.width * scale)} height={Math.max(4, visibleBoard.height * scale)} rx="2" /></svg><small>Нажмите на область, чтобы перейти к ней</small></div>;
 }
 
-function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected, viewMode = "full", nearbyIds = new Set(), onViewModeChange }) {
+function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, onZoomChange, pan, onPanChange, treeStyle, showPhotos, showFormerSurnames, cardFields, focusRequest, keyboardPanRequest, inspectorOpen, onToggleInspector, onFocusSelected, viewMode = "full", nearbyIds = new Set(), onViewModeChange }) {
   const dragRef = useRef(null);
   const personDragRef = useRef(null);
   const viewportRef = useRef(null);
@@ -883,7 +887,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className="tree-view-mode" role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "nearby" ? "selected" : ""} aria-pressed={viewMode === "nearby"} onClick={() => onViewModeChange?.("nearby")} disabled={!selectedId}>Ближайшая семья</button></div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(1.35, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(0.55, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} strictVisible={viewMode === "nearby"} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} visibleIds={visibleIds} strictVisible={viewMode === "nearby"} renderIndex={renderIndex} width={layout.width} height={layout.height} />{layout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: layout.top - 38 + group.index * layout.rowStep, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} selected={person.id === selectedId} onSelect={onSelect} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={layout} positions={renderedPositions} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {layout.generations.length}</span><span className="tree-view-status">{viewMode === "nearby" ? "Ближайшая семья" : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
@@ -1119,11 +1123,12 @@ function ViewSettingsModal({ treeStyle, showPhotos, cardFields, onTreeStyleChang
   );
 }
 
-function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, largeText, cardFields, onSave, onClose }) {
+function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields, onSave, onClose }) {
   const [title, setTitle] = useState(projectMeta.title || "Моё семейное древо");
   const [autoSave, setAutoSave] = useState(autoSaveEnabled);
   const [nextTreeStyle, setNextTreeStyle] = useState(treeStyle);
   const [nextShowPhotos, setNextShowPhotos] = useState(showPhotos);
+  const [nextShowFormerSurnames, setNextShowFormerSurnames] = useState(showFormerSurnames);
   const [nextLargeText, setNextLargeText] = useState(largeText);
   const [nextCardFields, setNextCardFields] = useState(sanitizeCardFields(cardFields));
   const [error, setError] = useState("");
@@ -1138,7 +1143,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
       setError("Название проекта содержит недопустимые символы.");
       return;
     }
-    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, largeText: nextLargeText, cardFields: nextCardFields });
+    onSave({ title: trimmedTitle, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: nextCardFields });
   };
   return (
     <div className="backup-modal-backdrop" role="presentation" onClick={onClose}>
@@ -1148,6 +1153,7 @@ function ProjectSettingsModal({ projectMeta, autoSaveEnabled, treeStyle, showPho
           <label className={`field settings-title-field ${error ? "has-error" : ""}`}><span>Название проекта</span><input value={title} onChange={(event) => { setTitle(event.target.value); setError(""); }} placeholder="Например, Семья Петровых" aria-invalid={Boolean(error)} />{error && <small className="field-error">{error}</small>}</label>
           <label className="view-toggle"><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /><span><strong>Автоматически сохранять изменения</strong><small>Локальная копия и резервная копия создаются после изменений.</small></span></label>
           <label className="view-toggle"><input type="checkbox" checked={nextShowPhotos} onChange={(event) => setNextShowPhotos(event.target.checked)} /><span><strong>Показывать фотографии</strong><small>Фото будут видны на карточках людей и в дереве.</small></span></label>
+          <label className="view-toggle"><input type="checkbox" checked={nextShowFormerSurnames} onChange={(event) => setNextShowFormerSurnames(event.target.checked)} /><span><strong>Показывать прежние фамилии</strong><small>Прежние фамилии будут указаны в скобках на карточках дерева.</small></span></label>
           <label className="view-toggle accessibility-toggle"><input type="checkbox" checked={nextLargeText} onChange={(event) => setNextLargeText(event.target.checked)} /><span><strong>Крупный текст</strong><small>Увеличивает основные подписи, кнопки, карточки и сведения для более комфортного чтения.</small></span></label>
           <CardFieldsPicker cardFields={nextCardFields} onChange={setNextCardFields} />
           <div className="view-setting-group"><span className="field-label">Стиль карточек</span><div className="style-choice-list">{styles.map((style) => <button type="button" key={style.value} className={`style-choice ${nextTreeStyle === style.value ? "selected" : ""}`} onClick={() => setNextTreeStyle(style.value)}><span className="style-choice-preview" data-style={style.value} /><span><strong>{style.title}</strong><small>{style.description}</small></span></button>)}</div></div>
@@ -1192,6 +1198,7 @@ export function App() {
   const [keyboardPanRequest, setKeyboardPanRequest] = useState(null);
   const [treeStyle, setTreeStyle] = useState(sessionSettings.treeStyle || "classic");
   const [showPhotos, setShowPhotos] = useState(sessionSettings.showPhotos !== false);
+  const [showFormerSurnames, setShowFormerSurnames] = useState(sessionSettings.showFormerSurnames !== false);
   const [largeText, setLargeText] = useState(sessionSettings.largeText === true);
   const [cardFields, setCardFields] = useState(sessionSettings.cardFields);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(sessionSettings.autoSave !== false);
@@ -1293,6 +1300,7 @@ export function App() {
     const settings = { ...defaultProjectSettings, ...(snapshot.projectMeta.settings || {}) };
     setTreeStyle(settings.treeStyle || "classic");
     setShowPhotos(settings.showPhotos !== false);
+    setShowFormerSurnames(settings.showFormerSurnames !== false);
     setLargeText(settings.largeText === true);
     setCardFields(sanitizeCardFields(settings.cardFields));
     setAutoSaveEnabled(settings.autoSave !== false);
@@ -1330,10 +1338,10 @@ export function App() {
     if (field === "cardFields") setCardFields(nextValue);
     setDirty(true);
   };
-  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, largeText: nextLargeText, cardFields: nextCardFields }) => {
+  const saveProjectSettings = ({ title, autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: nextCardFields }) => {
     const nextTitle = String(title || "").trim() || "Моё семейное древо";
     const normalizedCardFields = sanitizeCardFields(nextCardFields);
-    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, largeText: nextLargeText, cardFields: normalizedCardFields } };
+    const nextMeta = { ...projectMeta, title: nextTitle, settings: { ...defaultProjectSettings, ...(projectMeta.settings || {}), autoSave, treeStyle: nextTreeStyle, showPhotos: nextShowPhotos, showFormerSurnames: nextShowFormerSurnames, largeText: nextLargeText, cardFields: normalizedCardFields } };
     const payload = createProjectPayload(people, nextMeta, partnerships);
     try {
       writeWorkingCopy(payload);
@@ -1341,6 +1349,7 @@ export function App() {
       setAutoSaveEnabled(autoSave);
       setTreeStyle(nextTreeStyle);
       setShowPhotos(nextShowPhotos);
+      setShowFormerSurnames(nextShowFormerSurnames);
       setLargeText(nextLargeText);
       setCardFields(normalizedCardFields);
       setLastSavedAt(payload.manifest.updatedAt);
@@ -1521,12 +1530,15 @@ export function App() {
   };
   const openEditor = (person = null, relation = "") => {
     const contexts = new Set(Array.isArray(person?.familyContext) ? person.familyContext : []);
+    const targetId = person ? "" : selectedPerson?.id || people[0]?.id || "";
+    const baseDraft = person ? normalizePersonDate({ ...person }) : { ...blankPerson, id: "" };
+    const initialSuggestion = !person && relation === "child" ? surnameSuggestionsForChild({ people, parentId: targetId })[0] : null;
     setEditorSessionKey((current) => current + 1);
-    setDraft(person ? normalizePersonDate({ ...person }) : { ...blankPerson, id: "" });
+    setDraft(initialSuggestion ? applySuggestedChildSurname(baseDraft, initialSuggestion) : baseDraft);
     setRelationshipMode(relation);
     setRelationshipType("biological");
     setPartnershipType("marriage");
-    setConnectionTargetId(person ? "" : selectedPerson?.id || people[0]?.id || "");
+    setConnectionTargetId(targetId);
     setRelationshipSource("");
     setUnknownParent(false);
     setSingleKnownParent(contexts.has("single-known-parent"));
@@ -1612,8 +1624,9 @@ export function App() {
     if (!existing) return;
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draftValue));
     const isUnknown = Boolean(draftValue.isUnknown);
-    const normalizedName = isUnknown ? "" : String(draftValue.name || "").trim() || "Человек без имени";
-    const nextPerson = { ...existing, ...draftValue, isUnknown, name: normalizedName, shortName: normalizedName, source: String(draftValue.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draftValue.confidence) ? draftValue.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
+    const normalizedNameRecord = normalizePersonNames({ ...existing, ...draftValue, isUnknown });
+    const normalizedName = isUnknown ? "" : normalizedNameRecord.name || "Человек без имени";
+    const nextPerson = { ...normalizedNameRecord, isUnknown, name: normalizedName, shortName: normalizedName, surnameHistory: Array.isArray(draftValue.surnameHistory) ? normalizeSurnameHistory(draftValue.surnameHistory) : normalizeSurnameHistory(undefined, draftValue.maidenName), source: String(draftValue.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draftValue.confidence) ? draftValue.confidence : "unknown", birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
     setPeople((current) => current.map((person) => person.id === personId ? nextPerson : person));
     setSelectedPerson(personId);
     setDirty(true);
@@ -1642,9 +1655,10 @@ export function App() {
       ...(relationshipMode === "child" && outOfMarriage ? ["out-of-marriage"] : []),
       ...(relationshipMode === "sibling" && siblingWithoutParents ? ["sibling-without-parents"] : []),
     ])];
-    const normalizedName = isUnknownRecord ? "" : draft.name.trim() || "Человек без имени";
+    const normalizedNameRecord = normalizePersonNames({ ...draft, isUnknown: isUnknownRecord });
+    const normalizedName = isUnknownRecord ? "" : normalizedNameRecord.name || "Человек без имени";
     const normalizedBirthDate = normalizeDateRecord(getDraftDateRecord(draft));
-    const personToSave = { ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
+    const personToSave = { ...normalizedNameRecord, ...draft, isUnknown: isUnknownRecord, name: normalizedName, shortName: normalizedName, nameParts: normalizeNameParts(draft.nameParts), nameOrigin: normalizedNameRecord.nameOrigin, surnameHistory: Array.isArray(draft.surnameHistory) ? normalizeSurnameHistory(draft.surnameHistory) : normalizeSurnameHistory(undefined, draft.maidenName), source: String(draft.source || "").trim(), confidence: PERSON_CONFIDENCE_LEVELS.includes(draft.confidence) ? draft.confidence : "unknown", customFields: normalizeCustomFields(draft.customFields), factSources: normalizeFactSources(draft.factSources), timelineEvents: normalizeTimelineEvents(draft.timelineEvents), familyContext: newFamilyContext, birthDate: normalizedBirthDate, datePrecision: normalizedBirthDate.precision, year: formatDateRecord(normalizedBirthDate), birthDateFrom: normalizedBirthDate.from, birthDateTo: normalizedBirthDate.to };
     if (personToSave.id) { setPeople((current) => current.map((person) => person.id === personToSave.id ? personToSave : person)); setSelectedPerson(personToSave.id); setToast("Изменения сохранены"); } else {
       const newId = makeId();
       const newPerson = { ...personToSave, id: newId };
@@ -1819,6 +1833,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
+      setShowFormerSurnames(restoredSettings.showFormerSurnames !== false);
       setLargeText(restoredSettings.largeText === true);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
@@ -1869,6 +1884,7 @@ export function App() {
       setProjectMeta(nextProjectMeta);
       setTreeStyle(loadedSettings.treeStyle || "classic");
       setShowPhotos(loadedSettings.showPhotos !== false);
+      setShowFormerSurnames(loadedSettings.showFormerSurnames !== false);
       setLargeText(loadedSettings.largeText === true);
       setCardFields(sanitizeCardFields(loadedSettings.cardFields));
       setAutoSaveEnabled(loadedSettings.autoSave !== false);
@@ -1898,6 +1914,7 @@ export function App() {
       setProjectMeta({ ...payload.project, settings: restoredSettings, filePath: projectMeta.filePath || "" });
       setTreeStyle(restoredSettings.treeStyle || "classic");
       setShowPhotos(restoredSettings.showPhotos !== false);
+      setShowFormerSurnames(restoredSettings.showFormerSurnames !== false);
       setLargeText(restoredSettings.largeText === true);
       setCardFields(sanitizeCardFields(restoredSettings.cardFields));
       setAutoSaveEnabled(restoredSettings.autoSave !== false);
@@ -1984,7 +2001,7 @@ export function App() {
     }
     setPeople([]);
     setPartnerships([]);
-    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, largeText, cardFields: [...cardFields] } });
+    setProjectMeta({ id: "local-family-tree", title: "Моё семейное древо", fileName: "семейное-древо.familytree", filePath: "", settings: { ...defaultProjectSettings, autoSave: autoSaveEnabled, treeStyle, showPhotos, showFormerSurnames, largeText, cardFields: [...cardFields] } });
     setSelectedId("");
     resetPersonNavigation("");
     setTreeViewMode("full");
@@ -2038,7 +2055,7 @@ export function App() {
          </div>
        </header>
        <main className={`workspace ${inspectorOpen ? "" : "workspace-inspector-closed"}`} style={{ "--inspector-width": `${inspectorWidth}px` }}>
-         <TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека")} viewMode={treeViewMode} nearbyIds={nearbyFamilyIds} onViewModeChange={changeTreeViewMode} />
+         <TreeCanvas people={people} partnerships={partnerships} layout={treeLayout} selectedId={selectedId} onSelect={selectPerson} zoom={zoom} onZoomChange={setZoom} pan={pan} onPanChange={setPan} treeStyle={treeStyle} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} focusRequest={focusRequest} keyboardPanRequest={keyboardPanRequest} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen(true)} onFocusSelected={() => selectedId ? focusPersonOnMap(selectedId) : setToast("Сначала выберите человека")} viewMode={treeViewMode} nearbyIds={nearbyFamilyIds} onViewModeChange={changeTreeViewMode} />
          <aside className={`inspector ${inspectorOpen ? "inspector-open" : "inspector-closed"}`} aria-hidden={!inspectorOpen}>
            <div className="inspector-resize-handle" role="separator" aria-orientation="vertical" aria-label="Изменить ширину правой панели" aria-valuemin="300" aria-valuemax="560" aria-valuenow={Math.round(inspectorWidth)} tabIndex="0" onPointerDown={startInspectorResize} onPointerMove={moveInspectorResize} onPointerUp={endInspectorResize} onPointerCancel={endInspectorResize} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); resizeInspectorBy(16); } else if (event.key === "ArrowRight") { event.preventDefault(); resizeInspectorBy(-16); } else if (event.key === "Home") { event.preventDefault(); setInspectorWidth(560); } else if (event.key === "End") { event.preventDefault(); setInspectorWidth(300); } }} />
            <div className="inspector-header"><span>{editing ? "Редактирование" : relationshipEditing ? "Семейные связи" : "Выбран человек"}</span><IconButton label="Закрыть панель" onClick={closeInspector}><X size={21} /></IconButton></div>
@@ -2054,7 +2071,7 @@ export function App() {
        {instructionOpen && <InstructionModal onClose={closeInstruction} />}
        {exportModalOpen && <Suspense fallback={<div className="backup-modal-backdrop" role="status" aria-live="polite"><section className="backup-modal export-loading" role="dialog" aria-modal="true" aria-label="Открытие экспорта"><strong>Открываю экспорт…</strong></section></div>}><ExportModal initialFormat={exportPreset} people={people} partnerships={partnerships} treeStyle={treeStyle} showPhotos={showPhotos} cardFields={cardFields} onClose={() => setExportModalOpen(false)} onToast={setToast} /></Suspense>}
        {relationshipCalculatorOpen && <RelationshipCalculatorModal people={people} partnerships={partnerships} initialSourceId={selectedId} onClose={() => setRelationshipCalculatorOpen(false)} onSelectPerson={selectPerson} onShowOnMap={focusPersonOnMap} />}
-       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} largeText={largeText} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
+       {settingsOpen && <ProjectSettingsModal projectMeta={projectMeta} autoSaveEnabled={autoSaveEnabled} treeStyle={treeStyle} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} largeText={largeText} cardFields={cardFields} onSave={saveProjectSettings} onClose={closeSettings} />}
        {deleteConfirmId && <ConfirmModal title="Удалить человека?" description="Запись будет удалена из дерева, а её связи с родителями, партнёрами, братьями, сёстрами и детьми будут убраны. Перед этим будет создана резервная копия." confirmLabel="Удалить" onClose={() => setDeleteConfirmId("")} onConfirm={deletePerson} />}
        {relationshipDeleteConfirm && <ConfirmModal title="Удалить связь?" description={`${relationshipDeleteConfirm.label}. Связь будет убрана из дерева, а перед этим будет создана резервная копия. После удаления можно сразу отменить действие.`} confirmLabel="Удалить связь" onClose={() => setRelationshipDeleteConfirm(null)} onConfirm={deleteRelationship} />}
        {newTreeConfirmOpen && <ConfirmModal title="Создать новое дерево?" description="Текущее дерево останется в резервной копии, а рабочее полотно будет очищено." confirmLabel="Создать новое дерево" onClose={cancelNewTree} onConfirm={applyNewTree} />}

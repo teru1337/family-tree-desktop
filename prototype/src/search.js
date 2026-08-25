@@ -18,7 +18,9 @@ function valuesFromPerson(person, partnerships) {
     ...(Array.isArray(person?.siblingLinks) ? person.siblingLinks : []).map((link) => link?.source),
     ...(Array.isArray(partnerships) ? partnerships : []).filter((partnership) => partnership?.personIds?.includes(person?.id)).map((partnership) => partnership?.source),
   ];
-  return [personLabel(person), person?.shortName, person?.maidenName, person?.year, person?.place, person?.occupation, person?.biography, person?.source, ...factSources, ...timelineValues, ...customValues, ...relationSources].filter(Boolean).map(normalizedText);
+  const surnameHistory = (Array.isArray(person?.surnameHistory) ? person.surnameHistory : []).flatMap((item) => [item?.surname, item?.reason, item?.source, item?.note]);
+  const nameParts = [person?.nameParts?.familyName, person?.nameParts?.givenName, person?.nameParts?.patronymic];
+  return [personLabel(person), person?.shortName, ...nameParts, person?.maidenName, ...surnameHistory, person?.year, person?.place, person?.occupation, person?.biography, person?.source, ...factSources, ...timelineValues, ...customValues, ...relationSources].filter(Boolean).map(normalizedText);
 }
 
 function personSourceText(person, partnerships) {

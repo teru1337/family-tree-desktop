@@ -8,6 +8,9 @@ export default defineConfig({
       output: {
         manualChunks: {
           "data-quality": ["./src/data-quality.js"],
+          "person-names": ["./src/person-names.js"],
+          dates: ["./src/dates.js"],
+          timeline: ["./src/timeline.js"],
         },
       },
     },
