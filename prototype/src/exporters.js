@@ -1,4 +1,5 @@
 import { formatCardFieldLines } from "./person-fields.js";
+import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
 
 export const EXPORT_QUALITY = {
   screen: { label: "Экран", scale: 1, description: "быстрый файл для просмотра" },
@@ -107,15 +108,6 @@ async function imageToDataUrl(source) {
   }
 }
 
-function edgePath(from, to, connectionGap = 24) {
-  const startX = from.left + from.width / 2;
-  const startY = from.top + from.height;
-  const endX = to.left + to.width / 2;
-  const endY = to.top;
-  const middleY = startY + Math.max(connectionGap, (endY - startY) / 2);
-  return `M ${startX} ${startY} V ${middleY} H ${endX} V ${endY}`;
-}
-
 export async function buildTreeSvg({ people, partnerships = [], layout, treeStyle = "classic", showPhotos = true, cardFields = ["year"], fontScale = 1, connectionGap = 24 }) {
   const theme = THEMES[treeStyle] || THEMES.classic;
   const safeFontScale = Math.max(0.8, Number(fontScale) || 1);
@@ -140,22 +132,14 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
   })).filter(({ first, second }) => first && second && layout.positions[first.id] && layout.positions[second.id]);
 
   const connectionMarkup = parentEdges.map(({ parent, child, type }) => {
-    const path = edgePath(layout.positions[parent.id], layout.positions[child.id], safeConnectionGap);
+    const path = verticalConnection(layout.positions[parent.id], layout.positions[child.id], safeConnectionGap).path;
     return `<path d="${path}" fill="none" stroke="${theme.line}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"${type === "adoptive" ? ' stroke-dasharray="7 6"' : ""} />`;
   }).join("");
 
   const partnershipMarkup = partnerEdges.map(({ partnership, first, second }) => {
-    const firstPosition = layout.positions[first.id];
-    const secondPosition = layout.positions[second.id];
-    const start = firstPosition.left < secondPosition.left ? firstPosition : secondPosition;
-    const end = firstPosition.left < secondPosition.left ? secondPosition : firstPosition;
-    const startX = start.left + start.width;
-    const startY = start.top + start.height / 2;
-    const endX = end.left;
-    const endY = end.top + end.height / 2;
-    const middleX = startX + Math.max(safeConnectionGap / 2, (endX - startX) / 2);
+    const geometry = horizontalConnection(layout.positions[first.id], layout.positions[second.id], safeConnectionGap / 2);
     const label = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : partnership.type === "engagement" ? "Помолвка" : "Связь";
-    return `<path d="M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} /><text x="${middleX}" y="${Math.min(startY, endY) - 10 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(label)}</text>`;
+    return `<path d="${geometry.path}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} /><text x="${geometry.middleX}" y="${Math.min(geometry.startY, geometry.endY) - 10 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(label)}</text>`;
   }).join("");
 
   const generationTop = (layout.top ?? 78) - 38;
