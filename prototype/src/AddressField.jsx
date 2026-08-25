@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapPin } from "@phosphor-icons/react";
-import { requestAddressSuggestions } from "./geocoder.js";
+import { DEFAULT_GEOCODER_SETTINGS, requestAddressSuggestions } from "./geocoder.js";
 
 let sessionApiKey = "";
 
@@ -10,31 +10,61 @@ export function AddressField({ draft, errors, onChange, geocoderConfig }) {
   const [loading, setLoading] = useState(false);
   const cacheRef = useRef(new Map());
   const rateStateRef = useRef({ startedAt: 0, count: 0 });
+  const requestControllerRef = useRef(null);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    requestControllerRef.current?.abort();
+  }, []);
+  const cancelSearch = () => {
+    requestIdRef.current += 1;
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+    setLoading(false);
+  };
   const updatePlace = (value) => {
+    cancelSearch();
     onChange({ ...draft, place: value, placeDetails: null });
     setSuggestions([]);
     setMessage("");
   };
   const search = async () => {
+    cancelSearch();
+    const requestId = requestIdRef.current;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    requestControllerRef.current = controller;
     setLoading(true);
-    if (!sessionApiKey && typeof window !== "undefined") sessionApiKey = String(window.prompt("Введите API-ключ Яндекс Геокодера. Ключ будет храниться только до закрытия приложения.") || "").trim();
-    if (!sessionApiKey) {
-      setMessage("Ключ не введён. Адрес можно продолжить вводить вручную.");
-      setLoading(false);
-      return;
+    try {
+      if (!sessionApiKey && typeof window !== "undefined") sessionApiKey = String(window.prompt("Введите API-ключ Яндекс Геокодера. Ключ будет храниться только до закрытия приложения.") || "").trim();
+      if (!sessionApiKey) {
+        if (mountedRef.current && requestId === requestIdRef.current) setMessage("Ключ не введён. Адрес можно продолжить вводить вручную.");
+        return;
+      }
+      const result = await requestAddressSuggestions(draft.place, {
+        endpoint: DEFAULT_GEOCODER_SETTINGS.endpoint,
+        ...geocoderConfig,
+        apiKey: geocoderConfig?.apiKey || sessionApiKey,
+        cache: cacheRef.current,
+        rateState: rateStateRef.current,
+        onRateState: (state) => { rateStateRef.current = state; },
+        signal: controller?.signal,
+        fetchImpl: typeof window !== "undefined" && typeof window.fetch === "function" ? window.fetch.bind(window) : undefined,
+      });
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      if (result.status !== "aborted") setSuggestions(result.suggestions || []);
+      if (result.status !== "aborted") setMessage(result.message || "");
+    } catch {
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setSuggestions([]);
+        setMessage("Не удалось получить подсказки. Адрес можно продолжить вводить вручную.");
+      }
+    } finally {
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setLoading(false);
+        requestControllerRef.current = null;
+      }
     }
-    const result = await requestAddressSuggestions(draft.place, {
-      endpoint: "https://geocode-maps.yandex.ru/1.x/",
-      ...geocoderConfig,
-      apiKey: geocoderConfig?.apiKey || sessionApiKey,
-      cache: cacheRef.current,
-      rateState: rateStateRef.current,
-      onRateState: (state) => { rateStateRef.current = state; },
-      fetchImpl: typeof window !== "undefined" && typeof window.fetch === "function" ? window.fetch.bind(window) : undefined,
-    });
-    setSuggestions(result.suggestions || []);
-    setMessage(result.message || "");
-    setLoading(false);
   };
   const choose = (suggestion) => {
     onChange({ ...draft, place: suggestion.label, placeDetails: { locality: suggestion.locality, region: suggestion.region, country: suggestion.country, latitude: suggestion.latitude, longitude: suggestion.longitude, provider: suggestion.provider, selectedAt: new Date().toISOString() } });
