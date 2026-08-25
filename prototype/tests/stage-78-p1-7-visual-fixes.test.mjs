@@ -17,8 +17,11 @@ test("anchors partnership labels at the upper-left edge of the pair", () => {
 
 test("keeps a slow entrance and continuous animated background for the start menu", () => {
   assert.match(styles, /main-menu-entrance 1500ms/);
-  assert.match(styles, /main-menu-ambient 12s ease-in-out infinite alternate/);
-  assert.match(styles, /main-menu-branch-drift 9s ease-in-out infinite alternate/);
+  assert.match(styles, /main-menu-ambient 9s ease-in-out infinite alternate/);
+  assert.match(styles, /main-menu-branch-drift 7s ease-in-out infinite alternate/);
+  assert.match(styles, /main-menu-halo 1700ms/);
+  assert.match(styles, /main-menu-glint 1500ms/);
+  assert.match(styles, /main-menu-action-in/);
   assert.match(styles, /translateY\(52vh\) scale\(\.86\)/);
   assert.doesNotMatch(appSource, /setTimeout\(\(\) => setAnimationActive\(false\), 900\)/);
 });
