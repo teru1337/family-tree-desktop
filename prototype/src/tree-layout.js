@@ -106,7 +106,8 @@ export function buildTreeLayout(people, partnerships = [], options = {}) {
 
   const cardWidth = Math.max(190, Number(options.cardWidth) || 190);
   const cardHeight = Math.max(92, Number(options.cardHeight) || 92);
-  const memberGap = Math.max(18, Number(options.memberGap) || 24);
+  // Keep a readable channel between adjacent cards for partnership labels and lines.
+  const memberGap = Math.max(48, Number(options.memberGap) || 48);
   const blockGap = Math.max(48, Number(options.blockGap) || 64);
   const horizontalPadding = Math.max(260, Number(options.horizontalPadding) || 260);
   const verticalPadding = Math.max(180, Number(options.verticalPadding) || 180);

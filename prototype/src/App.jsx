@@ -62,6 +62,7 @@ import { CARD_FIELD_OPTIONS, DEFAULT_CARD_FIELDS, MAX_CUSTOM_FIELDS, MAX_CUSTOM_
 import { FACT_SOURCE_OPTIONS, MAX_EVENT_DATE, MAX_EVENT_DESCRIPTION, MAX_EVENT_PLACE, MAX_EVENT_SOURCE, MAX_EVENT_TITLE, MAX_TIMELINE_EVENTS, TIMELINE_EVENT_TYPES, normalizeFactSources, normalizeSourceValue, normalizeTimelineEvents, sortTimelineEvents } from "./timeline.js";
 import { buildTreeLayout } from "./tree-layout.js";
 import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
+import { layoutConnectionLabels } from "./connection-labels.js";
 import { applyRelationOperation, normalizeRelationState } from "./relation-operations.js";
 import { applySuggestedChildSurname, formerSurnames, formatPersonName, normalizeNameParts, normalizePersonNames, normalizeSurnameHistory, surnameSuggestionsForChild } from "./person-names.js";
 import { validateBasicPersonSection, validateFactSourcesSection, validateTimelineSection } from "./section-validation.js";
@@ -780,6 +781,7 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
         full: `${roles.currentRole} — ${roles.inverseRole}`,
         left: (geometry.startX + geometry.endX) / 2,
         top: geometry.middleY,
+        orientation: "vertical",
         muted: edgeMuted(parent.id, child.id),
       };
     }),
@@ -792,11 +794,13 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
         full: `${short}: ${personDisplayName(first)} — ${personDisplayName(second)}`,
         left: geometry.middleX,
         top: Math.min(geometry.startY, geometry.endY) - 8,
+        orientation: "horizontal",
         muted: edgeMuted(first.id, second.id),
       };
     }),
   ], [parentEdges, partnerEdges, positions, branchMode, branchIds, contextIds]);
-  return <><svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const geometry = verticalConnection(positions[parent.id], positions[child.id]); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""} ${edgeMuted(parent.id, child.id) ? "connection-branch-muted" : ""}`} d={geometry.path} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const geometry = horizontalConnection(positions[first.id], positions[second.id]); return <path key={partnership.id} className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""} ${edgeMuted(first.id, second.id) ? "connection-branch-muted" : ""}`} d={geometry.path} />; })}</g></svg><div className="tree-connection-labels" aria-label="Подписи семейных связей">{labels.map((label) => { const expanded = expandedLabelId === label.id; return <button key={label.id} type="button" className={`connection-label ${label.muted ? "connection-label-muted" : ""} ${expanded ? "expanded" : ""}`} style={{ left: label.left, top: label.top }} aria-expanded={expanded} title={expanded ? "Свернуть полное название связи" : label.full} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setExpandedLabelId((current) => current === label.id ? "" : label.id); }}>{expanded ? label.full : label.short}</button>; })}</div></>;
+  const positionedLabels = useMemo(() => layoutConnectionLabels(labels, { positions: Object.values(positions), labelGap: 8, channelGap: 24 }), [labels, positions]);
+  return <><svg className="tree-connections" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><g className="parent-connections">{parentEdges.map(({ parent, child, type }) => { const geometry = verticalConnection(positions[parent.id], positions[child.id]); return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""} ${edgeMuted(parent.id, child.id) ? "connection-branch-muted" : ""}`} d={geometry.path} />; })}</g><g className="partnership-connections">{partnerEdges.map(({ partnership, first, second }) => { const geometry = horizontalConnection(positions[first.id], positions[second.id]); return <path key={partnership.id} className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""} ${edgeMuted(first.id, second.id) ? "connection-branch-muted" : ""}`} d={geometry.path} />; })}</g></svg><div className="tree-connection-labels" aria-label="Подписи семейных связей">{positionedLabels.map((label) => { const expanded = expandedLabelId === label.id; return <button key={label.id} type="button" className={`connection-label ${label.muted ? "connection-label-muted" : ""} ${expanded ? "expanded" : ""}`} style={{ left: label.left, top: label.top, ...(!expanded ? { width: label.width } : {}) }} aria-expanded={expanded} title={expanded ? "Свернуть полное название связи" : label.full} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setExpandedLabelId((current) => current === label.id ? "" : label.id); }}>{expanded ? label.full : label.short}</button>; })}</div></>;
 }
 
 function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewportSize, onNavigate, hiddenIds = new Set(), renderIndex = null }) {

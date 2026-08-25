@@ -1,6 +1,7 @@
 import { formatCardFieldLines } from "./person-fields.js";
 import { formatPersonName as formatStructuredPersonName } from "./person-names.js";
 import { horizontalConnection, verticalConnection } from "./tree-geometry.js";
+import { layoutConnectionLabels } from "./connection-labels.js";
 
 export const EXPORT_QUALITY = {
   screen: { label: "Экран", scale: 1, description: "быстрый файл для просмотра" },
@@ -132,6 +133,17 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
     second: byId.get(partnership.personIds?.[1]),
   })).filter(({ first, second }) => first && second && layout.positions[first.id] && layout.positions[second.id]);
 
+  const parentLabelCandidates = parentEdges.map(({ parent, child, type }) => {
+    const geometry = verticalConnection(layout.positions[parent.id], layout.positions[child.id], safeConnectionGap);
+    return { id: `parent-${parent.id}-${child.id}-${type}`, short: type === "biological" ? "Родство" : type === "adoptive" ? "Усыновление" : type === "step" ? "Степ-родство" : type === "guardian" ? "Опекунство" : "Родство", left: (geometry.startX + geometry.endX) / 2, top: geometry.middleY, orientation: "vertical" };
+  });
+  const partnerLabelCandidates = partnerEdges.map(({ partnership, first, second }) => {
+    const geometry = horizontalConnection(layout.positions[first.id], layout.positions[second.id], safeConnectionGap / 2);
+    const short = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : partnership.type === "engagement" ? "Помолвка" : "Связь";
+    return { id: `partnership-${partnership.id}`, short, left: geometry.middleX, top: Math.min(geometry.startY, geometry.endY) - 8 * safeFontScale, orientation: "horizontal" };
+  });
+  const connectionLabels = layoutConnectionLabels([...parentLabelCandidates, ...partnerLabelCandidates], { positions: Object.values(layout.positions), labelGap: 8, channelGap: 24, fontScale: safeFontScale });
+
   const connectionMarkup = parentEdges.map(({ parent, child, type }) => {
     const path = verticalConnection(layout.positions[parent.id], layout.positions[child.id], safeConnectionGap).path;
     return `<path d="${path}" fill="none" stroke="${theme.line}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"${type === "adoptive" ? ' stroke-dasharray="7 6"' : ""} />`;
@@ -139,9 +151,10 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
 
   const partnershipMarkup = partnerEdges.map(({ partnership, first, second }) => {
     const geometry = horizontalConnection(layout.positions[first.id], layout.positions[second.id], safeConnectionGap / 2);
-    const label = partnership.status === "divorced" ? "Развод" : partnership.type === "marriage" ? "Брак" : partnership.type === "engagement" ? "Помолвка" : "Связь";
-    return `<path d="${geometry.path}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} /><text x="${geometry.middleX}" y="${Math.min(geometry.startY, geometry.endY) - 10 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" fill="${theme.label}">${escapeXml(label)}</text>`;
+    return `<path d="${geometry.path}" fill="none" stroke="${partnership.status === "divorced" ? "#b77979" : theme.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${partnership.status === "divorced" ? ' stroke-dasharray="6 5"' : ""} />`;
   }).join("");
+
+  const labelMarkup = connectionLabels.map((label) => `<rect x="${label.left - label.width / 2}" y="${label.top - label.height / 2}" width="${label.width}" height="${label.height}" rx="4" fill="${theme.background}" fill-opacity="0.94" /><text x="${label.left}" y="${label.top + 4 * safeFontScale}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${11 * safeFontScale}" font-weight="700" fill="${theme.label}">${escapeXml(label.short)}</text>`).join("");
 
   const generationTop = (layout.top ?? 78) - 38;
   const generationMarkup = layout.generations.map((group) => `<text x="24" y="${generationTop + group.index * (layout.rowStep ?? 190)}" font-family="Segoe UI, Arial, sans-serif" font-size="${12 * safeFontScale}" font-weight="600" letter-spacing="0.8" fill="${theme.label}">ПОКОЛЕНИЕ ${group.index + 1}</text>`).join("");
@@ -160,7 +173,7 @@ export async function buildTreeSvg({ people, partnerships = [], layout, treeStyl
     return `<g data-person-id="${escapeXml(person.id)}"><rect x="${position.left}" y="${position.top}" width="${position.width}" height="${position.height}" rx="9" fill="${theme.card}" stroke="${theme.border}" stroke-width="1.5" /><rect x="${position.left + 1}" y="${position.top + 1}" width="5" height="${position.height - 2}" rx="4" fill="${theme.accent}" opacity="0.8" /><clipPath id="photo-clip-${escapeXml(person.id)}"><rect x="${position.left + 13}" y="${position.top + 14}" width="48" height="62" rx="7" /></clipPath>${imageMarkup}${nameMarkup}${detailsMarkup}</g>`;
   }).join("");
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}"><rect width="100%" height="100%" fill="${theme.background}" /><path d="M 0 66 H ${layout.width}" stroke="${theme.border}" stroke-width="1" opacity="0.65" />${generationMarkup}<g>${connectionMarkup}${partnershipMarkup}</g>${nodeMarkup}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}"><rect width="100%" height="100%" fill="${theme.background}" /><path d="M 0 66 H ${layout.width}" stroke="${theme.border}" stroke-width="1" opacity="0.65" />${generationMarkup}<g>${connectionMarkup}${partnershipMarkup}${labelMarkup}</g>${nodeMarkup}</svg>`;
 }
 
 function loadSvgImage(svg) {
