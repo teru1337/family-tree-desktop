@@ -5,6 +5,7 @@ node_modules/
 # Vite and other build output
 dist/
 **/dist/
+media/intro/renders/
 release/
 **/release/
 .vite/
