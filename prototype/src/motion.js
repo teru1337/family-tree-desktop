@@ -24,6 +24,10 @@ export function prefersReducedMotion(matchMedia = globalThis.matchMedia) {
     && Boolean(matchMedia("(prefers-reduced-motion: reduce)")?.matches);
 }
 
+export function ambientMotionVisible(visibilityState = typeof document === "undefined" ? "visible" : document.visibilityState) {
+  return visibilityState !== "hidden" && visibilityState !== "prerender";
+}
+
 export function motionDurationMs(value = MOTION.duration.emphasis) {
   const milliseconds = Number.parseFloat(value);
   return Number.isFinite(milliseconds) ? milliseconds : 0;

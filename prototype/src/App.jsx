@@ -72,7 +72,7 @@ import { dateMaskCaretForDigits, formatDateMask } from "./date-input.js";
 import { MAX_TREE_ZOOM, MIN_TREE_ZOOM, clampTreeZoom, zoomAtPoint } from "./tree-viewport.js";
 import { DEFAULT_TREE_BRANCH_DEPTH, MAX_TREE_BRANCH_DEPTH, MIN_TREE_BRANCH_DEPTH, normalizeTreeBranchDepth } from "./tree-branch-depth.js";
 import { DEFAULT_SHORTCUTS, SHORTCUT_COMMANDS, sanitizeShortcutMap, shortcutCommandId, shortcutDisplayName, shortcutFromKeyboardEvent, validateShortcutMap } from "./shortcuts.js";
-import { motionDurationMs, prefersReducedMotion } from "./motion.js";
+import { ambientMotionVisible, motionDurationMs, prefersReducedMotion } from "./motion.js";
 import { includeExitingPeople, useCollapseMotion } from "./collapse-motion.js";
 import { useViewportMotion } from "./viewport-motion.js";
 
@@ -1285,15 +1285,32 @@ function MainMenuBackground() {
   );
 }
 
+function useAmbientMotionVisibility() {
+  const [visible, setVisible] = useState(() => ambientMotionVisible());
+  useEffect(() => {
+    const update = () => setVisible(ambientMotionVisible());
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("pageshow", update);
+    window.addEventListener("pagehide", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("pageshow", update);
+      window.removeEventListener("pagehide", update);
+    };
+  }, []);
+  return visible;
+}
+
 function MainMenuModal({ onCreate, onLoad, onSettings, onHelp, onExit, onClose, safeMode = false }) {
   const [closing, setClosing] = useState(false);
+  const ambientVisible = useAmbientMotionVisibility();
   const requestClose = () => {
     if (closing) return;
     setClosing(true);
     window.setTimeout(onClose, 160);
   };
   return (
-    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""} is-animation-active`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+    <div className={`main-menu-backdrop ${closing ? "is-closing" : ""} is-animation-active ${ambientVisible ? "is-ambient-visible" : "is-ambient-hidden"}`} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <MainMenuBackground />
       <section className="main-menu-card" role="dialog" aria-modal="true" aria-labelledby="main-menu-title" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="icon-button main-menu-close" onClick={requestClose} aria-label="Закрыть главное меню"><X size={21} /></button>

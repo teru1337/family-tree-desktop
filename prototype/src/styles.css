@@ -192,7 +192,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* Стартовое меню: полноэкранная сцена с отдельным декоративным слоем. */
 .main-menu-backdrop { display: grid; place-items: center; overflow: hidden; isolation: isolate; padding: 42px; background: radial-gradient(circle at 50% 44%, rgba(255,255,255,.92), rgba(231,243,225,.88) 48%, rgba(194,219,185,.96)); }
-.main-menu-background { position: absolute; z-index: -1; inset: 0; overflow: hidden; pointer-events: none; background: linear-gradient(135deg, rgba(255,255,255,.28), rgba(183,213,172,.32)); }
+.main-menu-background { position: absolute; z-index: -1; inset: 0; overflow: hidden; pointer-events: none; contain: strict; background: linear-gradient(135deg, rgba(255,255,255,.28), rgba(183,213,172,.32)); }
 .main-menu-background::before, .main-menu-background::after { content: ""; position: absolute; inset: -15%; background: radial-gradient(circle at 28% 30%, rgba(255,255,255,.92), transparent 25%), radial-gradient(circle at 74% 68%, rgba(130,177,112,.32), transparent 29%); }
 .main-menu-background::after { opacity: .72; transform: rotate(18deg); background: radial-gradient(circle at 54% 42%, rgba(255,255,255,.28), transparent 20%), radial-gradient(circle at 18% 78%, rgba(100,151,86,.26), transparent 24%); }
 .main-menu-branch, .main-menu-relation-line { position: absolute; display: block; height: 2px; transform-origin: left center; border-radius: 999px; background: linear-gradient(90deg, rgba(61,103,52,.18), rgba(78,137,65,.9), rgba(145,190,126,.28)); box-shadow: 0 0 20px rgba(79,139,67,.3); }
@@ -223,6 +223,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .main-menu-brand { gap: 18px; }.main-menu-brand h1 { font-size: 32px; }.main-menu-brand p { font-size: 13px; }.main-menu-list { gap: 10px; margin-top: 32px; }.main-menu-action { min-height: 66px; padding: 12px 15px; }.main-menu-action strong { font-size: 14px; }.main-menu-action small { font-size: 12px; }
 .main-menu-backdrop.is-animation-active .main-menu-background::before, .main-menu-backdrop.is-animation-active .main-menu-background::after { animation: main-menu-ambient var(--motion-duration-background-slow) ease-in-out infinite alternate; }.main-menu-backdrop.is-animation-active .main-menu-branch { animation: main-menu-branch-drift 7s ease-in-out infinite alternate; }.main-menu-backdrop.is-animation-active .main-menu-ghost-card { animation: main-menu-card-float var(--motion-duration-background-medium) ease-in-out infinite alternate; }.main-menu-backdrop.is-animation-active .main-menu-leaf { animation: main-menu-leaf-sway 3.8s ease-in-out infinite alternate; }.main-menu-backdrop.is-animation-active .main-menu-particle { animation: main-menu-particle-pulse var(--motion-duration-background-fast) ease-in-out infinite alternate; }
 .main-menu-backdrop.is-animation-active .main-menu-card::before { animation: main-menu-halo 1700ms ease-out both; }.main-menu-backdrop.is-animation-active .main-menu-card::after { animation: main-menu-glint var(--motion-duration-scene) ease-out 220ms both; }.main-menu-backdrop.is-animation-active .main-menu-brand { animation: main-menu-content-in var(--motion-duration-entrance) ease-out 440ms both; }.main-menu-backdrop.is-animation-active .main-menu-list { animation: main-menu-content-in var(--motion-duration-entrance) ease-out 570ms both; }.main-menu-backdrop.is-animation-active .main-menu-action { animation: main-menu-action-in 600ms var(--motion-ease-emphasis) both; }.main-menu-backdrop.is-animation-active .main-menu-action:nth-child(1) { animation-delay: 650ms; }.main-menu-backdrop.is-animation-active .main-menu-action:nth-child(2) { animation-delay: 730ms; }.main-menu-backdrop.is-animation-active .main-menu-action:nth-child(3) { animation-delay: 810ms; }.main-menu-backdrop.is-animation-active .main-menu-action:nth-child(4) { animation-delay: 890ms; }.main-menu-backdrop.is-animation-active .main-menu-action:nth-child(5) { animation-delay: 970ms; }
+.main-menu-backdrop.is-ambient-hidden .main-menu-background, .main-menu-backdrop.is-ambient-hidden .main-menu-background * { animation-play-state: paused !important; }
 @keyframes main-menu-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes main-menu-rise { from { opacity: 0; transform: translateY(70px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes tree-node-enter { from { opacity: var(--motion-opacity-enter); transform: translateY(12px) scale(var(--motion-scale-enter)); } 70% { opacity: .92; transform: translateY(-2px) scale(1.005); } to { opacity: var(--motion-opacity-rest); transform: translateY(0) scale(var(--motion-scale-rest)); } }
@@ -271,6 +272,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .main-menu-background, .main-menu-background * { animation: none !important; }
   .main-menu-backdrop.is-animation-active { animation: main-menu-backdrop-in 260ms ease-out both !important; }
   .main-menu-backdrop.is-animation-active .main-menu-card { animation: main-menu-rise 420ms cubic-bezier(.2,.75,.25,1) both !important; }
+}
+@media (prefers-contrast: more) {
+  .main-menu-background { opacity: .62; }
+  .main-menu-branch, .main-menu-relation-line { box-shadow: none; }
+  .main-menu-card { border-color: CanvasText; }
+}
+@media (forced-colors: active) {
+  .main-menu-background { display: none; }
+  .main-menu-card { border-color: CanvasText; background: Canvas; color: CanvasText; }
 }
 @media print { .app-header, .inspector, .tree-controls, .tree-minimap, .tree-status, .app-footer { display: none; }.app-window { display: block; min-width: 100%; min-height: auto; height: auto; }.workspace, .tree-panel { display: block; height: auto; overflow: visible; }.tree-viewport { position: relative; inset: auto; padding: 0; overflow: visible; }.tree-board { transform: none !important; margin: 0; } }
 
