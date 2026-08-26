@@ -596,7 +596,7 @@
 - каждый этап закрывать тестами, production-сборкой, визуальной проверкой,
   документацией, отдельными commit и push; релиз не создавать без запроса.
 
-Статус блока: **в работе, следующий этап M8**.
+Статус блока: **в работе, следующий этап M9**.
 
 Этапы M0–M3 завершены и задокументированы в `docs/stage-81-m0-motion-system.md`,
 `docs/stage-82-m1-card-motion.md`, `docs/stage-83-m2-relative-addition.md` и
@@ -604,7 +604,8 @@
 `docs/stage-85-m4-highlight-paths.md`. Этапы M3 и M4 также завершены локально;
 `docs/stage-86-m5-viewport-motion.md` документирует завершённый M5, а
 `docs/stage-87-m6-live-background.md` — завершённый M6. Этапы M3–M6 завершены
-локально; `docs/stage-88-m7-interactive-svg.md` документирует завершённый M7.
+локально; `docs/stage-88-m7-interactive-svg.md` документирует завершённый M7,
+а `docs/stage-89-m8-pixso-reference-board.md` — завершённый M8.
 Публикация каждого этапа выполняется отдельными commit, push и release после
 восстановления GitHub-аутентификации.
 
