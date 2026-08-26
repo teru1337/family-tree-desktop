@@ -24,6 +24,18 @@ export function prefersReducedMotion(matchMedia = globalThis.matchMedia) {
     && Boolean(matchMedia("(prefers-reduced-motion: reduce)")?.matches);
 }
 
+export function motionDurationMs(value = MOTION.duration.emphasis) {
+  const milliseconds = Number.parseFloat(value);
+  return Number.isFinite(milliseconds) ? milliseconds : 0;
+}
+
+export function layoutDelta(previous, next) {
+  if (!previous || !next) return null;
+  const x = previous.left - next.left;
+  const y = previous.top - next.top;
+  return x || y ? { x, y } : null;
+}
+
 export function restartAnimation(element, className) {
   if (!element?.classList || !className) return element;
   element.classList.remove(className);
