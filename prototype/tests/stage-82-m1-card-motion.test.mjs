@@ -12,14 +12,15 @@ test("calculates a transform-only FLIP delta and keeps motion duration bounded",
 
 test("animates cards and connector geometry after a committed layout", async () => {
   const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const motion = await readFile(new URL("../src/collapse-motion.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(app, /useLayoutEffect\(\(\) => \{/);
-  assert.match(app, /layoutDelta\(previous\[id\], position\)/);
+  assert.match(motion, /useLayoutEffect\(\(\) => \{/);
+  assert.match(motion, /layoutDelta\(previous\[id\], position\)/);
   assert.match(app, /tree-node-motion-enter/);
   assert.match(app, /tree-connections-previous/);
   assert.match(app, /tree-connections-current/);
-  assert.match(app, /cancelAnimationFrame/);
-  assert.match(app, /clearTimeout/);
+  assert.match(motion, /cancelAnimationFrame/);
+  assert.match(motion, /clearTimeout/);
   assert.match(styles, /@keyframes tree-node-enter/);
   assert.match(styles, /\.tree-node-motion-enter/);
   assert.match(styles, /\.tree-connections-current-from/);

@@ -18,6 +18,7 @@ export default defineConfig({
           "change-log": ["./src/change-log.js"],
           storage: ["./src/storage.js"],
           "tree-collapse": ["./src/tree-collapse.js"],
+          "collapse-motion": ["./src/collapse-motion.js"],
         },
       },
     },

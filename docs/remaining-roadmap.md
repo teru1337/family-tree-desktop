@@ -596,10 +596,11 @@
 - каждый этап закрывать тестами, production-сборкой, визуальной проверкой,
   документацией, отдельными commit и push; релиз не создавать без запроса.
 
-Статус блока: **в работе, следующий этап M3**.
+Статус блока: **в работе, следующий этап M4**.
 
-Этапы M0–M2 завершены и задокументированы в `docs/stage-81-m0-motion-system.md`,
-`docs/stage-82-m1-card-motion.md` и `docs/stage-83-m2-relative-addition.md`.
+Этапы M0–M3 завершены и задокументированы в `docs/stage-81-m0-motion-system.md`,
+`docs/stage-82-m1-card-motion.md`, `docs/stage-83-m2-relative-addition.md` и
+`docs/stage-84-m3-collapse-motion.md`. Этап M3 также завершён.
 
 ## Правило завершения этапа
 

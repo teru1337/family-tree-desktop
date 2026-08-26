@@ -22,9 +22,9 @@ test("coordinates committed relative additions, errors, cancellation and accessi
   const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(app, /startAdditionMotion\(\{ newPersonId: newId/);
-  assert.match(app, /phase: ADDITION_PHASES\.prepare/);
-  assert.match(app, /phase: ADDITION_PHASES\.reveal/);
-  assert.match(app, /phase: ADDITION_PHASES\.settle/);
+  assert.match(app, /phase: "prepare"/);
+  assert.match(app, /phase: "reveal"/);
+  assert.match(app, /phase: "settle"/);
   assert.match(app, /cancelAdditionMotion\(\);/);
   assert.match(app, /setToast\("Добавление записи в дерево…"\)/);
   assert.match(app, /setToast\(message\)/);

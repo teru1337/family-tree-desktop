@@ -72,8 +72,8 @@ import { dateMaskCaretForDigits, formatDateMask } from "./date-input.js";
 import { MAX_TREE_ZOOM, MIN_TREE_ZOOM, zoomAtPoint } from "./tree-viewport.js";
 import { DEFAULT_TREE_BRANCH_DEPTH, MAX_TREE_BRANCH_DEPTH, MIN_TREE_BRANCH_DEPTH, normalizeTreeBranchDepth } from "./tree-branch-depth.js";
 import { DEFAULT_SHORTCUTS, SHORTCUT_COMMANDS, sanitizeShortcutMap, shortcutCommandId, shortcutDisplayName, shortcutFromKeyboardEvent, validateShortcutMap } from "./shortcuts.js";
-import { layoutDelta, motionDurationMs, prefersReducedMotion } from "./motion.js";
-import { ADDITION_PHASES, additionEdgeMatches, additionRole, additionSequenceDurations } from "./addition-motion.js";
+import { motionDurationMs, prefersReducedMotion } from "./motion.js";
+import { includeExitingPeople, useCollapseMotion } from "./collapse-motion.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
@@ -263,13 +263,13 @@ function PersonAvatar({ person, large = false, showPhoto = true }) {
   return showPhoto && person?.image ? <img className={`person-avatar ${large ? "person-avatar-large" : ""}`} src={person.image} alt="" /> : <span className={`person-avatar person-avatar-empty ${large ? "person-avatar-large" : ""}`}><User size={large ? 32 : 20} weight="regular" /></span>;
 }
 
-function TreeNode({ person, position, selected, branchMuted, onSelect, onKeyboardNavigate, showPhotos, showFormerSurnames, cardFields, childNumber, dragging, onDragStart, onDragMove, onDragEnd, collapsible = false, collapsed = false, onToggleCollapse, motionTransform = "", entering = false, additionRoleName = "", additionPhase = "" }) {
+function TreeNode({ person, position, selected, branchMuted, onSelect, onKeyboardNavigate, showPhotos, showFormerSurnames, cardFields, childNumber, dragging, onDragStart, onDragMove, onDragEnd, collapsible = false, collapsed = false, onToggleCollapse, motionTransform = "", entering = false, exiting = false, additionRoleName = "", additionPhase = "" }) {
   const cardLines = formatCardFieldLines(person, cardFields);
   const cardName = formatPersonName(person, { showFormerSurnames });
   const genderClass = !person.isUnknown && person.gender === "male" ? "tree-node-gender-male" : !person.isUnknown && person.gender === "female" ? "tree-node-gender-female" : "";
   return (
     <>
-    <button className={`tree-node ${genderClass} ${branchMuted ? "tree-node-branch-muted" : ""} ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""} ${entering ? "tree-node-motion-enter" : ""} ${additionRoleName ? `tree-node-addition-${additionRoleName} tree-node-addition-${additionPhase}` : ""}`} data-person-id={person.id} style={{ left: position.left, top: position.top, width: position.width, height: position.height, ...(motionTransform ? { transform: motionTransform } : {}) }} type="button" onClick={() => onSelect(person.id)} onKeyDown={(event) => onKeyboardNavigate?.(person.id, event)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" aria-label={`${cardName}${childNumber ? `, ребёнок номер ${childNumber}` : ""}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
+    <button className={`tree-node ${genderClass} ${branchMuted ? "tree-node-branch-muted" : ""} ${selected ? "tree-node-selected" : ""} ${showPhotos ? "" : "tree-node-no-photo"} ${dragging ? "tree-node-dragging" : ""} ${entering ? "tree-node-motion-enter" : ""} ${exiting ? "tree-node-motion-exit" : ""} ${additionRoleName ? `tree-node-addition-${additionRoleName} tree-node-addition-${additionPhase}` : ""}`} data-person-id={person.id} style={{ left: position.left, top: position.top, width: position.width, height: position.height, ...(motionTransform ? { transform: motionTransform } : {}) }} type="button" onClick={() => onSelect(person.id)} onKeyDown={(event) => onKeyboardNavigate?.(person.id, event)} onPointerDown={(event) => onDragStart?.(person.id, event)} onPointerMove={(event) => onDragMove?.(event)} onPointerUp={(event) => onDragEnd?.(event)} onPointerCancel={(event) => onDragEnd?.(event)} aria-pressed={selected} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" aria-label={`${cardName}${childNumber ? `, ребёнок номер ${childNumber}` : ""}${cardLines.length ? `, ${cardLines.join(", ")}` : ""}`}>
       {childNumber && <span className="tree-node-child-number" aria-label={`Ребёнок номер ${childNumber}`}>№{childNumber}</span>}
       {hasDeathInformation(person) && <span className="tree-node-death-marker" aria-label="Дата смерти указана" title="Дата смерти указана">†</span>}
       <PersonAvatar person={person} showPhoto={showPhotos} />
@@ -278,7 +278,7 @@ function TreeNode({ person, position, selected, branchMuted, onSelect, onKeyboar
         <span className="tree-node-details">{cardLines.map((line, index) => <span key={`${person.id}-card-line-${index}`} className={index === 0 && sanitizeCardFields(cardFields).includes("year") ? "tree-node-year" : "tree-node-detail"}>{line}</span>)}</span>
       </span>
     </button>
-    {collapsible && <button type="button" className={`tree-node-collapse ${collapsed ? "is-collapsed" : ""} ${entering ? "tree-node-motion-enter" : ""}`} style={{ left: position.left + position.width - 22, top: position.top - 10, ...(motionTransform ? { transform: motionTransform } : {}) }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggleCollapse?.(person.id); }} aria-label={`${collapsed ? "Развернуть" : "Свернуть"} ветвь: ${cardName}`} title={`${collapsed ? "Развернуть" : "Свернуть"} ветвь`}><span className="tree-node-collapse-icon" aria-hidden="true">{collapsed ? <CaretRight size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}</span></button>}
+    {collapsible && <button type="button" className={`tree-node-collapse ${collapsed ? "is-collapsed" : ""} ${entering ? "tree-node-motion-enter" : ""} ${exiting ? "tree-node-motion-exit" : ""}`} style={{ left: position.left + position.width - 22, top: position.top - 10, ...(motionTransform ? { transform: motionTransform } : {}) }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggleCollapse?.(person.id); }} aria-label={`${collapsed ? "Развернуть" : "Свернуть"} ветвь: ${cardName}`} title={`${collapsed ? "Развернуть" : "Свернуть"} ветвь`}><span className="tree-node-collapse-icon" aria-hidden="true">{collapsed ? <CaretRight size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}</span></button>}
     </>
   );
 }
@@ -792,11 +792,11 @@ function RelationshipEditor({ person, people, partnerships, initialKind = "paren
   );
 }
 
-function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, hiddenIds = new Set(), renderIndex = null, strictVisible = false, branchMode = false, branchIds = new Set(), contextIds = new Set(), expandedLabelId = "", onExpandedLabelChange, transitionPositions = null, transitionPhase = "from", additionMotion = null }) {
+function TreeConnections({ people, partnerships, positions, width, height, visibleIds = null, hiddenIds = new Set(), renderIndex = null, strictVisible = false, branchMode = false, branchIds = new Set(), contextIds = new Set(), expandedLabelId = "", onExpandedLabelChange, transitionPositions = null, transitionHiddenIds = null, transitionPhase = "from", additionMotion = null }) {
   const byId = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const fallbackIndex = useMemo(() => createRenderIndex(people, partnerships, byId), [people, partnerships, byId]);
   const index = renderIndex || fallbackIndex;
-  const edgeVisible = (edge, firstId, secondId) => !hiddenIds.has(firstId) && !hiddenIds.has(secondId) && (!strictVisible || !visibleIds || (visibleIds.has(firstId) && visibleIds.has(secondId)));
+  const edgeVisible = (edge, firstId, secondId, edgeHiddenIds = hiddenIds) => !edgeHiddenIds.has(firstId) && !edgeHiddenIds.has(secondId) && (!strictVisible || !visibleIds || (visibleIds.has(firstId) && visibleIds.has(secondId)));
   const allParentEdges = useMemo(() => visibleEdges(index.parentEdges, visibleIds, index.parentEdgesByPerson), [index, visibleIds]);
   const allPartnerEdges = useMemo(() => visibleEdges(index.partnershipEdges, visibleIds, index.partnershipEdgesByPerson), [index, visibleIds]);
   const parentEdges = useMemo(() => allParentEdges.filter((edge) => positions[edge.parent.id] && positions[edge.child.id] && edgeVisible(edge, edge.parent.id, edge.child.id)), [allParentEdges, positions, hiddenIds, strictVisible, visibleIds]);
@@ -835,18 +835,18 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
     }),
   ], [parentEdges, partnerEdges, positions, branchMode, branchIds, contextIds]);
   const positionedLabels = useMemo(() => layoutConnectionLabels(labels, { positions: Object.values(positions), labelGap: 8, channelGap: 24 }), [labels, positions]);
-  const additionClass = (edge) => additionMotion && additionEdgeMatches(edge, additionMotion) ? `connection-addition connection-addition-${additionMotion.phase}` : "";
-  const renderConnectionSvg = (positionMap, className) => (
+  const additionClass = (edge) => additionMotion && edge.personIds?.length === 2 && edge.personIds.includes(additionMotion.newPersonId) && edge.personIds.includes(additionMotion.targetPersonId) ? `connection-addition connection-addition-${additionMotion.phase}` : "";
+  const renderConnectionSvg = (positionMap, className, edgeHiddenIds = hiddenIds) => (
     <svg className={className} width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
       <g className="parent-connections">
-        {allParentEdges.filter(({ parent, child }) => positionMap[parent.id] && positionMap[child.id] && edgeVisible({ parent, child }, parent.id, child.id)).map(({ parent, child, type }) => {
+        {allParentEdges.filter(({ parent, child }) => positionMap[parent.id] && positionMap[child.id] && edgeVisible({ parent, child }, parent.id, child.id, edgeHiddenIds)).map(({ parent, child, type }) => {
           const geometry = verticalConnection(positionMap[parent.id], positionMap[child.id]);
           const extraClass = additionClass({ kind: "parent", personIds: [parent.id, child.id] });
           return <path key={`${parent.id}-${child.id}-${type}`} className={`connection-line ${type === "adoptive" ? "connection-adoptive" : ""} ${type === "step" ? "connection-step" : ""} ${edgeMuted(parent.id, child.id) ? "connection-branch-muted" : ""} ${extraClass}`} d={geometry.path} />;
         })}
       </g>
       <g className="partnership-connections">
-        {allPartnerEdges.filter(({ first, second }) => positionMap[first.id] && positionMap[second.id] && edgeVisible({ first, second }, first.id, second.id)).map(({ partnership, first, second }) => {
+        {allPartnerEdges.filter(({ first, second }) => positionMap[first.id] && positionMap[second.id] && edgeVisible({ first, second }, first.id, second.id, edgeHiddenIds)).map(({ partnership, first, second }) => {
           const geometry = horizontalConnection(positionMap[first.id], positionMap[second.id]);
           const extraClass = additionClass({ kind: "partnership", personIds: [first.id, second.id] });
           return <path key={partnership.id} className={`connection-line connection-partnership ${partnership.status === "divorced" ? "connection-divorced" : ""} ${edgeMuted(first.id, second.id) ? "connection-branch-muted" : ""} ${extraClass}`} d={geometry.path} />;
@@ -856,7 +856,7 @@ function TreeConnections({ people, partnerships, positions, width, height, visib
     </svg>
   );
   const currentClass = transitionPositions ? `tree-connections tree-connections-current tree-connections-current-${transitionPhase}` : "tree-connections";
-  return <>{transitionPositions && renderConnectionSvg(transitionPositions, `tree-connections tree-connections-previous ${transitionPhase === "to" ? "tree-connections-previous-to" : ""}`)}{renderConnectionSvg(positions, currentClass)}<div className="tree-connection-labels" aria-label="Подписи семейных связей">{positionedLabels.map((label) => { const expanded = expandedLabelId === label.id; return <button key={label.id} type="button" className={`connection-label ${label.muted ? "connection-label-muted" : ""} ${expanded ? "expanded" : ""}`} style={{ left: label.left, top: label.top, width: expanded ? label.expandedWidth : label.width, ...(expanded ? { minHeight: label.expandedHeight } : {}) }} aria-expanded={expanded} title={expanded ? "Свернуть полное название связи" : label.full} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onExpandedLabelChange?.((current) => current === label.id ? "" : label.id); }}>{expanded ? label.full : label.short}</button>; })}</div></>;
+  return <>{transitionPositions && renderConnectionSvg(transitionPositions, `tree-connections tree-connections-previous ${transitionPhase === "to" ? "tree-connections-previous-to" : ""}`, transitionHiddenIds || hiddenIds)}{renderConnectionSvg(positions, currentClass)}<div className="tree-connection-labels" aria-label="Подписи семейных связей">{positionedLabels.map((label) => { const expanded = expandedLabelId === label.id; return <button key={label.id} type="button" className={`connection-label ${label.muted ? "connection-label-muted" : ""} ${expanded ? "expanded" : ""}`} style={{ left: label.left, top: label.top, width: expanded ? label.expandedWidth : label.width, ...(expanded ? { minHeight: label.expandedHeight } : {}) }} aria-expanded={expanded} title={expanded ? "Свернуть полное название связи" : label.full} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onExpandedLabelChange?.((current) => current === label.id ? "" : label.id); }}>{expanded ? label.full : label.short}</button>; })}</div></>;
 }
 
 function TreeMiniMap({ people, partnerships, layout, positions, pan, zoom, viewportSize, onNavigate, hiddenIds = new Set(), renderIndex = null }) {
@@ -890,13 +890,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
   const [personDraggingId, setPersonDraggingId] = useState("");
   const [expandedLabelId, setExpandedLabelId] = useState("");
   const [manualOffsets, setManualOffsets] = useState({});
-  const [cardMotion, setCardMotion] = useState({ transforms: {}, enteringIds: new Set() });
-  const [connectionMotion, setConnectionMotion] = useState(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const previousPositionsRef = useRef(null);
-  const motionFrameRef = useRef(0);
-  const motionTimerRef = useRef(0);
-  const motionTokenRef = useRef(0);
   const displayLayout = useMemo(() => withExpandedPartnershipClearance(layout, partnerships, expandedLabelId), [layout, partnerships, expandedLabelId]);
   const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const renderIndex = useMemo(() => createRenderIndex(people, partnerships, peopleById), [people, partnerships, peopleById]);
@@ -927,38 +921,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     const offset = manualOffsets[id] || { x: 0, y: 0 };
     return [id, { ...position, left: position.left + offset.x, top: position.top + offset.y }];
   })), [displayLayout.positions, manualOffsets]);
-  useLayoutEffect(() => {
-    const previous = previousPositionsRef.current;
-    previousPositionsRef.current = renderedPositions;
-    if (!previous || personDraggingId || prefersReducedMotion()) return;
-    const transforms = {};
-    const enteringIds = [];
-    Object.entries(renderedPositions).forEach(([id, position]) => {
-      const delta = layoutDelta(previous[id], position);
-      if (delta) transforms[id] = `translate(${delta.x}px, ${delta.y}px)`;
-      else if (!previous[id]) enteringIds.push(id);
-    });
-    if (!Object.keys(transforms).length && !enteringIds.length) return;
-    if (motionFrameRef.current) window.cancelAnimationFrame(motionFrameRef.current);
-    if (motionTimerRef.current) window.clearTimeout(motionTimerRef.current);
-    const token = motionTokenRef.current + 1;
-    motionTokenRef.current = token;
-    setCardMotion({ transforms, enteringIds: new Set(enteringIds) });
-    setConnectionMotion({ previousPositions: previous, phase: "from", token });
-    motionFrameRef.current = window.requestAnimationFrame(() => {
-      setCardMotion({ transforms: {}, enteringIds: new Set() });
-      setConnectionMotion((current) => current?.token === token ? { ...current, phase: "to" } : current);
-    });
-    motionTimerRef.current = window.setTimeout(() => {
-      setConnectionMotion((current) => current?.token === token ? null : current);
-      motionFrameRef.current = 0;
-      motionTimerRef.current = 0;
-    }, motionDurationMs() + 40);
-  }, [renderedPositions, personDraggingId]);
-  useEffect(() => () => {
-    if (motionFrameRef.current) window.cancelAnimationFrame(motionFrameRef.current);
-    if (motionTimerRef.current) window.clearTimeout(motionTimerRef.current);
-  }, []);
+  const { cardMotion, connectionMotion, exitingIds } = useCollapseMotion({ renderedPositions, hiddenIds, personDraggingId });
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return undefined;
@@ -985,6 +948,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     return new Set([...modeIds].filter((id) => viewportIds.has(id)));
   }, [renderedPositions, hiddenIds, pan.x, pan.y, zoom, viewportSize, viewMode, nearbyIds]);
   const visiblePeople = useMemo(() => visibleIds ? people.filter((person) => visibleIds.has(person.id) && !hiddenIds.has(person.id)) : people.filter((person) => !hiddenIds.has(person.id)), [people, visibleIds, hiddenIds]);
+  const motionVisiblePeople = includeExitingPeople(visiblePeople, people, exitingIds, renderedPositions);
   const navigateTreeNode = (personId, event) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault();
@@ -1173,7 +1137,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className={`tree-view-mode ${viewMode === "branch" ? "tree-view-mode-branch" : ""}`} role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "branch" ? "selected" : ""} aria-pressed={viewMode === "branch"} onClick={() => onViewModeChange?.("branch")} disabled={!selectedId}>Родственная ветвь</button>{viewMode === "branch" && <label className="tree-branch-depth"><span>Глубина</span><select value={branchDepth} onChange={(event) => onBranchDepthChange?.(event.target.value)} aria-label="Глубина родственной ветви">{Array.from({ length: MAX_TREE_BRANCH_DEPTH - MIN_TREE_BRANCH_DEPTH + 1 }, (_, index) => { const value = String(MIN_TREE_BRANCH_DEPTH + index); return <option key={value} value={value}>{value} {value === "1" ? "поколение" : "поколений"}</option>; })}</select></label>}{collapsedIds.size > 0 && <button type="button" className="tree-collapse-reset" onClick={onResetCollapsedBranches}>Развернуть ветви</button>}</div>
       <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(MAX_TREE_ZOOM, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(MIN_TREE_ZOOM, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Центрировать семейную пару" onClick={centerFamilyPair} disabled={!selectedId}><UsersThree size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} role="region" aria-label="Полотно семейного дерева. Колесо мыши изменяет масштаб, Shift+колесо перемещает полотно" tabIndex="0" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: displayLayout.width, height: displayLayout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} transitionPositions={connectionMotion?.previousPositions} transitionPhase={connectionMotion?.phase} additionMotion={additionMotion} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={displayLayout.width} height={displayLayout.height} expandedLabelId={expandedLabelId} onExpandedLabelChange={setExpandedLabelId} />{displayLayout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: group.top - 38, left: 24 }}>Поколение {group.index + 1}</span>)}{visiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} motionTransform={cardMotion.transforms[person.id]} entering={cardMotion.enteringIds.has(person.id)} additionRoleName={additionRole(person.id, additionMotion)} additionPhase={additionMotion?.phase || ""} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} onKeyboardNavigate={navigateTreeNode} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} role="region" aria-label="Полотно семейного дерева. Колесо мыши изменяет масштаб, Shift+колесо перемещает полотно" tabIndex="0" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: displayLayout.width, height: displayLayout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} transitionPositions={connectionMotion?.previousPositions} transitionHiddenIds={connectionMotion?.previousHiddenIds} transitionPhase={connectionMotion?.phase} additionMotion={additionMotion} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={displayLayout.width} height={displayLayout.height} expandedLabelId={expandedLabelId} onExpandedLabelChange={setExpandedLabelId} />{displayLayout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: group.top - 38, left: 24 }}>Поколение {group.index + 1}</span>)}{motionVisiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} motionTransform={cardMotion.transforms[person.id]} entering={cardMotion.enteringIds.has(person.id)} exiting={exitingIds.has(person.id)} additionRoleName={additionMotion?.newPersonId === person.id ? "new" : additionMotion?.targetPersonId === person.id ? "target" : ""} additionPhase={additionMotion?.phase || ""} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} onKeyboardNavigate={navigateTreeNode} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={displayLayout} positions={renderedPositions} hiddenIds={hiddenIds} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {displayLayout.generations.length}</span><span className="tree-view-status">{viewMode === "branch" ? `Родственная ветвь · ${branchDepth} ${branchDepth === "1" ? "поколение" : "поколений"}` : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>
     </section>
@@ -1661,21 +1625,21 @@ export function App() {
     const token = additionTokenRef.current + 1;
     additionTokenRef.current = token;
     const reduced = prefersReducedMotion();
-    const durations = additionSequenceDurations(reduced);
+    const durations = reduced ? { leadIn: 0, reveal: 0, settle: 0 } : { leadIn: motionDurationMs("120ms"), reveal: motionDurationMs("220ms"), settle: motionDurationMs("180ms") };
     const base = { newPersonId, targetPersonId, relationKind, token };
     if (reduced) {
       setAdditionMotion(null);
       setToast(message);
       return;
     }
-    setAdditionMotion({ ...base, phase: ADDITION_PHASES.prepare });
+    setAdditionMotion({ ...base, phase: "prepare" });
     setToast("Добавление записи в дерево…");
     additionFrameRef.current = window.requestAnimationFrame(() => {
-      setAdditionMotion((current) => current?.token === token ? { ...current, phase: ADDITION_PHASES.reveal } : current);
+      setAdditionMotion((current) => current?.token === token ? { ...current, phase: "reveal" } : current);
       additionFrameRef.current = 0;
     });
     additionTimerRef.current = window.setTimeout(() => {
-      setAdditionMotion((current) => current?.token === token ? { ...current, phase: ADDITION_PHASES.settle } : current);
+      setAdditionMotion((current) => current?.token === token ? { ...current, phase: "settle" } : current);
       additionTimerRef.current = 0;
       additionClearTimerRef.current = window.setTimeout(() => {
         setAdditionMotion((current) => current?.token === token ? null : current);
