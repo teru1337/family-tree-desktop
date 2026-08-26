@@ -31,6 +31,13 @@ export function personLabel(person) {
   return person?.name || "Человек без имени";
 }
 
+export function relationshipEdgeKey(edge = {}) {
+  if (edge.kind === "parent") return `parent:${edge.parentId}:${edge.childId}:${edge.type || BIOLOGICAL}`;
+  if (edge.kind === "partnership") return `partnership:${edge.id || (edge.personIds || []).slice().sort().join("|")}`;
+  if (edge.kind === "sibling") return `sibling:${(edge.personIds || []).slice().sort().join("|")}:${edge.type || BIOLOGICAL}`;
+  return "";
+}
+
 function parentLinksFor(person) {
   if (person?.parentLinks?.length) return person.parentLinks;
   return (person?.parentIds || []).map((personId) => ({ personId, type: BIOLOGICAL }));
