@@ -69,11 +69,12 @@ import { validateBasicPersonSection, validateFactSourcesSection, validateTimelin
 import { appendChangeLog, normalizeRecordOrigin, recordOriginLabel } from "./change-log.js";
 import { createCollapseIndex, getCollapsedDescendantIds, getCollapsibleIds } from "./tree-collapse.js";
 import { dateMaskCaretForDigits, formatDateMask } from "./date-input.js";
-import { MAX_TREE_ZOOM, MIN_TREE_ZOOM, zoomAtPoint } from "./tree-viewport.js";
+import { MAX_TREE_ZOOM, MIN_TREE_ZOOM, clampTreeZoom, zoomAtPoint } from "./tree-viewport.js";
 import { DEFAULT_TREE_BRANCH_DEPTH, MAX_TREE_BRANCH_DEPTH, MIN_TREE_BRANCH_DEPTH, normalizeTreeBranchDepth } from "./tree-branch-depth.js";
 import { DEFAULT_SHORTCUTS, SHORTCUT_COMMANDS, sanitizeShortcutMap, shortcutCommandId, shortcutDisplayName, shortcutFromKeyboardEvent, validateShortcutMap } from "./shortcuts.js";
 import { motionDurationMs, prefersReducedMotion } from "./motion.js";
 import { includeExitingPeople, useCollapseMotion } from "./collapse-motion.js";
+import { useViewportMotion } from "./viewport-motion.js";
 
 const ExportModal = lazy(() => import("./ExportModal.jsx").then(({ ExportModal: Component }) => ({ default: Component })));
 const NameEditorFields = lazy(() => import("./NameEditorFields.jsx"));
@@ -943,6 +944,7 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     return [id, { ...position, left: position.left + offset.x, top: position.top + offset.y }];
   })), [displayLayout.positions, manualOffsets]);
   const { cardMotion, connectionMotion, exitingIds } = useCollapseMotion({ renderedPositions, hiddenIds, personDraggingId });
+  const { active: viewportMotionActive, animateTo, cancel: cancelViewportMotion } = useViewportMotion({ zoom, pan, onZoomChange, onPanChange });
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return undefined;
@@ -1011,20 +1013,44 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     return { minX: Math.min(edgePadding, boardRight), maxX: Math.max(edgePadding, boardRight), minY: Math.min(edgePadding, boardBottom), maxY: Math.max(edgePadding, boardBottom) };
   };
   const clampPan = (value, forZoom = zoom) => { const bounds = getPanBounds(forZoom); return { x: Math.max(bounds.minX, Math.min(bounds.maxX, value.x)), y: Math.max(bounds.minY, Math.min(bounds.maxY, value.y)) }; };
-  const movePan = (x, y) => onPanChange(clampPan({ x: pan.x + x, y: pan.y + y }));
+  const viewportPoint = () => {
+    const viewport = viewportRef.current;
+    if (!viewport) return { x: 0, y: 0 };
+    const styles = window.getComputedStyle(viewport);
+    const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0;
+    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+    return { x: Math.max(0, (viewport.clientWidth - paddingLeft) / 2), y: Math.max(0, (viewport.clientHeight - paddingTop) / 2) };
+  };
+  const animateViewportTo = (target, options = {}) => {
+    const safeZoom = clampTreeZoom(target.zoom);
+    return animateTo({ zoom: safeZoom, pan: clampPan(target.pan, safeZoom) }, options);
+  };
+  const movePan = (x, y, { animated = false } = {}) => {
+    const target = { zoom, pan: clampPan({ x: pan.x + x, y: pan.y + y }) };
+    if (animated) animateViewportTo(target);
+    else {
+      cancelViewportMotion();
+      onPanChange(target.pan);
+    }
+  };
+  const animateZoomBy = (delta, point = viewportPoint()) => {
+    const nextZoom = clampTreeZoom(zoom + delta);
+    const worldPoint = { x: (point.x - pan.x) / zoom, y: (point.y - pan.y) / zoom };
+    animateViewportTo({ zoom: nextZoom, pan: { x: point.x - worldPoint.x * nextZoom, y: point.y - worldPoint.y * nextZoom } });
+  };
+  const animatePanBy = (x, y) => movePan(x, y, { animated: true });
   const centerView = () => {
     const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
     const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
     if (!width || !height) return;
-    onPanChange(clampPan({ x: (width - displayLayout.width * zoom) / 2, y: (height - displayLayout.height * zoom) / 2 }));
+    animateViewportTo({ zoom, pan: { x: (width - displayLayout.width * zoom) / 2, y: (height - displayLayout.height * zoom) / 2 } });
   };
   const fitAll = () => {
     const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
     const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
     if (!width || !height) return;
     const nextZoom = Math.max(MIN_TREE_ZOOM, Math.min(MAX_TREE_ZOOM, Math.min((width - 48) / displayLayout.width, (height - 48) / displayLayout.height)));
-    onZoomChange(nextZoom);
-    onPanChange(clampPan({ x: (width - displayLayout.width * nextZoom) / 2, y: (height - displayLayout.height * nextZoom) / 2 }, nextZoom));
+    animateViewportTo({ zoom: nextZoom, pan: { x: (width - displayLayout.width * nextZoom) / 2, y: (height - displayLayout.height * nextZoom) / 2 } });
   };
   const centerFamilyPair = () => {
     const selectedPosition = renderedPositions[selectedId];
@@ -1036,16 +1062,18 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     const centerY = partnerPosition ? (selectedPosition.top + selectedPosition.height / 2 + partnerPosition.top + partnerPosition.height / 2) / 2 : selectedPosition.top + selectedPosition.height / 2;
     const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
     const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
-    if (width && height) onPanChange(clampPan({ x: width / 2 - centerX * zoom, y: height / 2 - centerY * zoom }));
+    if (width && height) animateViewportTo({ zoom, pan: { x: width / 2 - centerX * zoom, y: height / 2 - centerY * zoom } });
   };
   const onPointerDown = (event) => {
     if (event.button !== 0 || event.target.closest("button")) return;
+    cancelViewportMotion();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { x: event.clientX, y: event.clientY, pan };
     setDragging(true);
   };
   const onPersonPointerDown = (id, event) => {
     if (event.button !== 0) return;
+    cancelViewportMotion();
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const offset = manualOffsets[id] || { x: 0, y: 0 };
@@ -1111,8 +1139,9 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
     const deltaY = normalizeWheelDelta(event.deltaY, event.deltaMode);
     if (!deltaX && !deltaY) return;
     event.preventDefault();
+    cancelViewportMotion();
     if (event.shiftKey || (!deltaY && deltaX)) {
-      movePan(-(deltaX || deltaY), 0);
+      animatePanBy(-(deltaX || deltaY), 0);
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1125,12 +1154,12 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
       point: { x: event.clientX - rect.left - paddingLeft, y: event.clientY - rect.top - paddingTop },
       wheelDelta: deltaY,
     });
-    onZoomChange(nextViewport.zoom);
-    onPanChange(clampPan(nextViewport.pan, nextViewport.zoom));
+    animateViewportTo(nextViewport, { duration: motionDurationMs("120ms") });
   };
   useEffect(() => {
     if (!keyboardPanRequest?.token) return;
-    movePan(keyboardPanRequest.dx, keyboardPanRequest.dy);
+    if (keyboardPanRequest.zoomDelta) animateZoomBy(keyboardPanRequest.zoomDelta);
+    else animatePanBy(keyboardPanRequest.dx, keyboardPanRequest.dy);
   }, [keyboardPanRequest?.token]);
   useEffect(() => {
     if (!focusRequest?.id || !viewportRef.current) return;
@@ -1141,24 +1170,24 @@ function TreeCanvas({ people, partnerships, layout, selectedId, onSelect, zoom, 
       x: rect.width / 2 - (position.left + position.width / 2) * zoom,
       y: rect.height / 2 - (position.top + position.height / 2) * zoom,
     };
-    onPanChange(clampPan(nextPan));
-  }, [focusRequest?.token, displayLayout, renderedPositions, zoom]);
+    animateViewportTo({ zoom, pan: nextPan });
+  }, [focusRequest?.token, displayLayout, renderedPositions, viewportSize]);
   useEffect(() => {
     const nextPan = clampPan(pan);
-    if (nextPan.x !== pan.x || nextPan.y !== pan.y) onPanChange(nextPan);
+    if (nextPan.x !== pan.x || nextPan.y !== pan.y) animateViewportTo({ zoom, pan: nextPan }, { immediate: true });
   }, [displayLayout.width, displayLayout.height, zoom, inspectorOpen]);
   const navigateToBoardPoint = ({ x, y }) => {
     const width = viewportSize.width || viewportRef.current?.clientWidth || 0;
     const height = viewportSize.height || viewportRef.current?.clientHeight || 0;
     if (!width || !height) return;
-    onPanChange(clampPan({ x: width / 2 - x * zoom, y: height / 2 - y * zoom }));
+    animateViewportTo({ zoom, pan: { x: width / 2 - x * zoom, y: height / 2 - y * zoom } });
   };
   const styleLabel = treeStyle === "album" ? "Семейный альбом" : treeStyle === "minimal" ? "Сдержанный" : "Классический";
   return (
     <section className={`tree-panel tree-style-${treeStyle}`}>
       <div className={`tree-view-mode ${viewMode === "branch" ? "tree-view-mode-branch" : ""}`} role="group" aria-label="Режим просмотра дерева"><span>Вид дерева</span><button type="button" className={viewMode === "full" ? "selected" : ""} aria-pressed={viewMode === "full"} onClick={() => onViewModeChange?.("full")}>Всё дерево</button><button type="button" className={viewMode === "branch" ? "selected" : ""} aria-pressed={viewMode === "branch"} onClick={() => onViewModeChange?.("branch")} disabled={!selectedId}>Родственная ветвь</button>{viewMode === "branch" && <label className="tree-branch-depth"><span>Глубина</span><select value={branchDepth} onChange={(event) => onBranchDepthChange?.(event.target.value)} aria-label="Глубина родственной ветви">{Array.from({ length: MAX_TREE_BRANCH_DEPTH - MIN_TREE_BRANCH_DEPTH + 1 }, (_, index) => { const value = String(MIN_TREE_BRANCH_DEPTH + index); return <option key={value} value={value}>{value} {value === "1" ? "поколение" : "поколений"}</option>; })}</select></label>}{collapsedIds.size > 0 && <button type="button" className="tree-collapse-reset" onClick={onResetCollapsedBranches}>Развернуть ветви</button>}{highlightPathIds.size > 0 && <button type="button" className="tree-highlight-reset" onClick={onClearHighlight}>Снять подсветку</button>}</div>
-      <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => movePan(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => movePan(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => movePan(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => movePan(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => onZoomChange(Math.min(MAX_TREE_ZOOM, zoom + 0.08))}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => onZoomChange(Math.max(MIN_TREE_ZOOM, zoom - 0.08))}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Центрировать семейную пару" onClick={centerFamilyPair} disabled={!selectedId}><UsersThree size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
-      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""}`} role="region" aria-label="Полотно семейного дерева. Колесо мыши изменяет масштаб, Shift+колесо перемещает полотно" tabIndex="0" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: displayLayout.width, height: displayLayout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} transitionPositions={connectionMotion?.previousPositions} transitionHiddenIds={connectionMotion?.previousHiddenIds} transitionPhase={connectionMotion?.phase} additionMotion={additionMotion} highlightPersonId={highlightPathIds.size ? "" : selectedId} highlightEdgeKeys={highlightEdgeKeys} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={displayLayout.width} height={displayLayout.height} expandedLabelId={expandedLabelId} onExpandedLabelChange={setExpandedLabelId} />{displayLayout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: group.top - 38, left: 24 }}>Поколение {group.index + 1}</span>)}{motionVisiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} motionTransform={cardMotion.transforms[person.id]} entering={cardMotion.enteringIds.has(person.id)} exiting={exitingIds.has(person.id)} pathHighlighted={highlightPathIds.has(person.id)} additionRoleName={additionMotion?.newPersonId === person.id ? "new" : additionMotion?.targetPersonId === person.id ? "target" : ""} additionPhase={additionMotion?.phase || ""} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} onKeyboardNavigate={navigateTreeNode} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
+      <div className="tree-controls left-controls"><div className="pan-control"><IconButton label="Переместить вверх" onClick={() => animatePanBy(0, -110)}><CaretUp size={18} /></IconButton><IconButton label="Переместить влево" onClick={() => animatePanBy(-110, 0)}><CaretLeft size={18} /></IconButton><IconButton label="Переместить вправо" onClick={() => animatePanBy(110, 0)}><CaretRight size={18} /></IconButton><IconButton label="Переместить вниз" onClick={() => animatePanBy(0, 110)}><CaretDown size={18} /></IconButton></div><div className="zoom-control"><IconButton label="Увеличить" onClick={() => animateZoomBy(0.08)}><Plus size={18} /></IconButton><span>{Math.round(zoom * 100)}%</span><IconButton label="Уменьшить" onClick={() => animateZoomBy(-0.08)}><Minus size={18} /></IconButton></div><div className="view-command-control"><IconButton label="Показать всё дерево" onClick={fitAll}><ArrowsOut size={18} /></IconButton><IconButton label="По центру" onClick={centerView}><Crosshair size={18} /></IconButton><IconButton label="Центрировать семейную пару" onClick={centerFamilyPair} disabled={!selectedId}><UsersThree size={18} /></IconButton><IconButton label="Вернуться к выбранному человеку" onClick={onFocusSelected} disabled={!selectedId}><MapPin size={18} /></IconButton></div>{!inspectorOpen && <IconButton label="Открыть панель сведений" className="inspector-toggle-control" onClick={onToggleInspector}><Info size={20} /></IconButton>}</div>
+      <div ref={viewportRef} className={`tree-viewport ${dragging ? "is-dragging" : ""} ${viewportMotionActive ? "is-viewport-animating" : ""}`} role="region" aria-label="Полотно семейного дерева. Колесо мыши изменяет масштаб, Shift+колесо перемещает полотно" tabIndex="0" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onWheel={onWheel}><div className="tree-board" style={{ width: displayLayout.width, height: displayLayout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><TreeConnections people={people} partnerships={partnerships} positions={renderedPositions} transitionPositions={connectionMotion?.previousPositions} transitionHiddenIds={connectionMotion?.previousHiddenIds} transitionPhase={connectionMotion?.phase} additionMotion={additionMotion} highlightPersonId={highlightPathIds.size ? "" : selectedId} highlightEdgeKeys={highlightEdgeKeys} visibleIds={visibleIds} hiddenIds={hiddenIds} strictVisible={viewMode === "branch"} branchMode={viewMode === "branch"} branchIds={branchIds} contextIds={contextIds} renderIndex={renderIndex} width={displayLayout.width} height={displayLayout.height} expandedLabelId={expandedLabelId} onExpandedLabelChange={setExpandedLabelId} />{displayLayout.generations.map((group) => <span className="generation-label" key={group.index} style={{ top: group.top - 38, left: 24 }}>Поколение {group.index + 1}</span>)}{motionVisiblePeople.map((person) => renderedPositions[person.id] ? <TreeNode key={person.id} person={person} position={renderedPositions[person.id]} motionTransform={cardMotion.transforms[person.id]} entering={cardMotion.enteringIds.has(person.id)} exiting={exitingIds.has(person.id)} pathHighlighted={highlightPathIds.has(person.id)} additionRoleName={additionMotion?.newPersonId === person.id ? "new" : additionMotion?.targetPersonId === person.id ? "target" : ""} additionPhase={additionMotion?.phase || ""} selected={person.id === selectedId} branchMuted={viewMode === "branch" && !branchIds.has(person.id) && !contextIds.has(person.id)} collapsible={collapsibleIds.has(person.id)} collapsed={collapsedIds.has(person.id)} onToggleCollapse={onToggleCollapse} onSelect={onSelect} onKeyboardNavigate={navigateTreeNode} showPhotos={showPhotos} showFormerSurnames={showFormerSurnames} cardFields={cardFields} childNumber={childNumberById.get(person.id)} dragging={person.id === personDraggingId} onDragStart={onPersonPointerDown} onDragMove={onPersonPointerMove} onDragEnd={onPersonPointerEnd} /> : null)}</div></div>
       {people.length > 0 && <TreeMiniMap people={people} partnerships={partnerships} layout={displayLayout} positions={renderedPositions} hiddenIds={hiddenIds} pan={pan} zoom={zoom} viewportSize={viewportSize} onNavigate={navigateToBoardPoint} renderIndex={renderIndex} />}
       <div className="tree-status"><span><UsersThree size={17} /> Всего людей: {people.length}</span><span className="status-divider" /><span>Поколений: {displayLayout.generations.length}</span><span className="tree-view-status">{viewMode === "branch" ? `Родственная ветвь · ${branchDepth} ${branchDepth === "1" ? "поколение" : "поколений"}` : "Всё дерево"} · {showPhotos ? "Фото включены" : "Фото скрыты"} · {styleLabel}</span></div>{highlightStatus && <div className="visually-hidden" role="status" aria-live="polite">{highlightStatus}</div>}
     </section>
@@ -1938,8 +1967,8 @@ export function App() {
       else if (commandId === "undo") undoAction();
       else if (commandId === "redo") redoAction();
       else if (commandId === "search") searchInputRef.current?.focus();
-      else if (commandId === "zoomIn") setZoom((current) => Math.min(MAX_TREE_ZOOM, current + 0.08));
-      else if (commandId === "zoomOut") setZoom((current) => Math.max(MIN_TREE_ZOOM, current - 0.08));
+      else if (commandId === "zoomIn") setKeyboardPanRequest((current) => ({ zoomDelta: 0.08, dx: 0, dy: 0, token: (current?.token || 0) + 1 }));
+      else if (commandId === "zoomOut") setKeyboardPanRequest((current) => ({ zoomDelta: -0.08, dx: 0, dy: 0, token: (current?.token || 0) + 1 }));
       else if (commandId === "panUp") setKeyboardPanRequest((current) => ({ dx: 0, dy: -110, token: (current?.token || 0) + 1 }));
       else if (commandId === "panDown") setKeyboardPanRequest((current) => ({ dx: 0, dy: 110, token: (current?.token || 0) + 1 }));
       else if (commandId === "panLeft") setKeyboardPanRequest((current) => ({ dx: -110, dy: 0, token: (current?.token || 0) + 1 }));

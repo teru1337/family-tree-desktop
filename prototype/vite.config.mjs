@@ -19,6 +19,7 @@ export default defineConfig({
           storage: ["./src/storage.js"],
           "tree-collapse": ["./src/tree-collapse.js"],
           "collapse-motion": ["./src/collapse-motion.js"],
+          "viewport-motion": ["./src/viewport-motion.js"],
         },
       },
     },
